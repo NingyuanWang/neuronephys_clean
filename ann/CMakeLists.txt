@@ -14,6 +14,11 @@ file(GLOB_RECURSE sources ${source_path}/*.cpp)
 include (GenerateExportHeader)
 #Build library
 add_library(${target} SHARED ${intermediate_headers} ${sources})
+# Set ouput directory
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib)
+set_target_properties (${target} PROPERTIES 
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib )
 # Add include directories
 target_include_directories(${target} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 GENERATE_EXPORT_HEADER( ANN
