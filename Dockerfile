@@ -46,16 +46,16 @@ RUN apt-get update \
         liblapack-dev \
         liblapacke-dev \
         libopenblas-dev \
-		libhdf5-serial-dev \
-		libxmu-dev \
-		libxi-dev \
-		libgl-dev \
+        libhdf5-serial-dev \
+        libxmu-dev \
+        libxi-dev \
+        libgl-dev \
         ocl-icd-opencl-dev \
         opencl-headers \
         wget \
         xorg-dev && \
     rm -rf /var/lib/apt/lists/*
-	
+    
 RUN apt update \
     && apt install -y --no-install-recommends --allow-unauthenticated \
         lxde gtk2-engines-murrine gnome-themes-standard gtk2-engines-pixbuf gtk2-engines-murrine arc-theme \
@@ -83,7 +83,7 @@ COPY rootfs/usr/local/lib/web/backend/requirements.txt /tmp/
 RUN apt-get update \
     && dpkg-query -W -f='${Package}\n' > /tmp/a.txt \
     && apt-get install -y python3-pip python3-dev build-essential \
-	&& pip3 install setuptools wheel && pip3 install -r /tmp/requirements.txt \
+    && pip3 install setuptools wheel && pip3 install -r /tmp/requirements.txt \
     && ln -s /usr/bin/python3 /usr/local/bin/python \
     && dpkg-query -W -f='${Package}\n' > /tmp/b.txt \
     && apt-get remove -y `diff --changed-group-format='%>' --unchanged-group-format='' /tmp/a.txt /tmp/b.txt | xargs` \
@@ -103,21 +103,65 @@ RUN git clone --depth 1 --branch 3.3.4 https://github.com/glfw/glfw.git && \
     make install
 # Build GLEW from source
 RUN git clone --depth 1 https://github.com/nigels-com/glew.git && \
-	cd glew && \
-	cd auto && \
-	make && \
-	cd .. && \
-	make && \
-	make install && \
-	make clean
+    cd glew && \
+    cd auto && \
+    make && \
+    cd .. && \
+    make && \
+    make install && \
+    make clean
 #Clone GLM. Build not needed as the library is header-only
 RUN git clone --depth 1 https://github.com/g-truc/glm.git
 #Build ann using Cmake: 
 COPY ann /ann
-RUN cd /src/ann \
-	&& cmake build -B lib . \
-	&& cd lib \
-	&& make ANN
+RUN cd /ann \
+    && cmake . \
+    && make ANN
+#Install arrayfire:
+# Setting up symlinks for libcuda and OpenCL ICD
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/libcuda.so.1 && \
+    ln -s /usr/lib/libcuda.so.1 /usr/lib/libcuda.so && \
+    mkdir -p /etc/OpenCL/vendors && \
+    echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd && \
+    echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
+    echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
+WORKDIR /root
+RUN cd /tmp && \
+    wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB && \
+    apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB && \
+    rm GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB && \
+    echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list && \
+    add-apt-repository "deb https://apt.repos.intel.com/oneapi all main" && \
+    apt update -y && apt install -y intel-basekit
+
+SHELL ["/bin/bash", "-c"]
+
+# AF_DISABLE_GRAPHICS - Environment variable to disable graphics at
+# runtime due to lack of graphics support by docker - visit
+# http://arrayfire.org/docs/configuring_environment.htm#af_disable_graphics
+# for more information
+ENV AF_PATH=/opt/arrayfire AF_DISABLE_GRAPHICS=1
+ARG COMPILE_GRAPHICS=OFF
+RUN source /opt/intel/oneapi/setvars.sh && \
+    git clone --depth 1 --recursive https://github.com/arrayfire/arrayfire.git -b v3.7 && \
+    cd arrayfire && mkdir build && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/arrayfire-3 \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DAF_BUILD_CPU=OFF \
+             -DAF_BUILD_CUDA=ON \
+             -DAF_BUILD_DOCS=OFF \
+             -DAF_BUILD_EXAMPLES=OFF \
+             -DAF_BUILD_OPENCL=OFF \
+             -DAF_BUILD_UNIFIED=OFF \
+             -DAF_WITH_FREEIMAGE_STATIC=OFF && \
+             # -DCOMPUTES_DETECTED_LIST="30;35;37;50;52;60" \
+    make -j8 && make install && \
+    mkdir -p ${AF_PATH} && ln -s /opt/arrayfire-3/* ${AF_PATH}/ && \
+    echo "${AF_PATH}/lib" >> /etc/ld.so.conf.d/arrayfire.conf && \
+    echo "/usr/local/cuda/nvvm/lib64" >> /etc/ld.so.conf.d/arrayfire.conf && \
+    ldconfig
+#
 ################################################################################
 # builder
 ################################################################################
@@ -156,7 +200,7 @@ LABEL maintainer="fcwu.tw@gmail.com"
 COPY --from=builder /src/web/dist/ /usr/local/lib/web/frontend/
 COPY rootfs /
 RUN ln -sf /usr/local/lib/web/frontend/static/websockify /usr/local/lib/web/frontend/static/novnc/utils/websockify && \
-	chmod +x /usr/local/lib/web/frontend/static/websockify/run
+    chmod +x /usr/local/lib/web/frontend/static/websockify/run
 
 EXPOSE 80
 WORKDIR /root
