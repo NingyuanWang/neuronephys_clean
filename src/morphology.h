@@ -4,7 +4,7 @@
 #include <ANN/ANN.h>
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
-#include "regions_tree.h"
+#pragma once
 
 //! Morphology is an abstract class that supports morphology generation 
 //! and operations such as union, nearest-neighbor, etc.
@@ -67,12 +67,6 @@ public:
 	//! Same as other KNN, but position, not neuron index, is sent.
 	void KNN(ANNpoint pos, int const k, std::vector<int>& knn, std::vector<ANNdist>& knn_dists);
 
-	//! Finds the neurons within a ball of neuron n.
-	int WithinBall(int const n, Float dist_not_sqr, int max_n_conns, std::vector<int>& ball, std::vector<ANNdist>& ball_dists);
-
-	//! Same as other WithinBall, but position, not neuron index, is sent.
-	int WithinBall(ANNpoint pos, Float dist_not_sqr, int max_n_conns, std::vector<int>& ball, std::vector<ANNdist>& ball_dists);
-
 	//! Generate a list of KNN regions at specific neurons.
 	/*!
 		\param [out] h_regions Column indices for region adjacency list. 
@@ -103,39 +97,8 @@ public:
 
 	//! Find the minimum distance between any two adjacent points.
 	float GetMinimumDistance();
-	
-	//! Project neurons to a plane in some dimension. 
-	//! \param [in] dim Dimension to project. Defaults to 0 (X dimension).
-	void ProjectNeuronsToPlane(int dim = 0);
-
-	//! Function for generating custom regions based on a functor defined by the user operating on individual points.
-	/*!
-		\param [in] selector Functor defined by user that operates on individual points and assigns them to a region index. If region index is -1, they are not put in any region.
-		\param [in] N_regions Number of regions defined by user.
-	*/	
-	template<typename RegionSelector>
-	void GenCustomRegions(RegionSelector& selector, int N_regions, thrust::host_vector<int>& h_regions, thrust::host_vector<int>& h_region_inds) const
-    {
-        std::vector<std::vector<int>> regions_raw(N_regions);
-        for (int n = 0; n < positions.size(); ++n)
-        {
-            auto const& pos{ positions[n] };
-            int idx = selector(pos);
-            if (idx >= 0)
-                regions_raw[idx].push_back(n);
-        }
-
-        // Transfer info from regions_raw to h_regions and h_Regions_inds.
-        h_region_inds.resize(N_regions + 1);
-        for (int i = 0; i < N_regions; ++i)
-        {
-            h_region_inds[i + 1] = h_region_inds[i] + regions_raw.size();
-            int cur_sz = h_regions.size();
-            h_regions.resize(cur_sz + regions_raw.size());
-            for (int j = 0; j < regions_raw.size(); ++j)
-                h_regions[cur_sz + j] = regions_raw[i][j];
-        }
-    }
+	//! Find the maximum distance between any two adjacent points.
+	float GetMaximumDistance();
 
 	//! Getter for positions. 
 	std::vector<glm::vec3> const& GetPositions() { return positions; }
@@ -199,46 +162,14 @@ class FileMorphology : public Morphology
 protected:	
 	std::string fl_name;	
 	std::string format;
-	std::vector<int> unique_regions;
-	std::vector<int> regions;
-	bool read_regions;
+
 public:
 	/*!
 	  \param [in] fl_name_ Name of file to read from.
-	  \param [in] read_regions_ Defaults to false. If true, read in region ids per neuron.
 	*/
-	FileMorphology(std::string const& fl_name_, bool read_regions_=false);
+	FileMorphology(std::string const& fl_name_);
 	bool GenerateFromHDF(int const N);
 	virtual bool Generate(int const N) override;
-
-	//! Replace all regions with parent region at specified depth in Allen atlas region tree. 
-	/*!
-	  \param [in] depth_in_tree This specifies the depth of the subregion in the Allen atlas regions which are stored as tree. By default, leaf regions are used.
-	  \param [in] regions_tree RegionsTree class which represents the heirarchy of regions for the Allen Atlas regions. See: RegionsTree.
-	*/
-	void SpecfiyRegionsDepth(int const depth_in_tree, RegionsTree const& regions_tree);
-
-	//! Generate a list of regions defined by the region IDs in regions variable, read from file. 
-	/*!
-		\param [out] h_regions Column indices for region adjacency list. 
-		\param [out] h_region_inds Row offsets for region adjacency list.
-		\param [out] associated_ids Vector of IDs associated with each of the regions. 
-	*/	
-	void GenRegionsFromIDs(thrust::host_vector<int>& h_regions, thrust::host_vector<int>& h_region_inds, thrust::host_vector<int>& associated_ids);
-
-	std::vector<int> const& GetRegions() const { return regions; }
-};
-
-//! Point cloud provided by user.
-class UserPointCloud : public Morphology
-{
-public:
-	UserPointCloud(std::vector<glm::vec3> const& positions_)
-		: Morphology()
-	{
-		positions = positions_;
-	}
-	virtual bool Generate(int const N) override { return false; } // Should not be called.
 };
 
 //! 2D Mouse brain scan generated from a BMP binary image.

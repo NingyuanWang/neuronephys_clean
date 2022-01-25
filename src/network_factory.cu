@@ -2,15 +2,12 @@
 #include "network_factory.cuh"
 #include <unordered_set>
 
-AdjacencyList Network::ToAdjacencyList(Float*& Tcount, bool use_weights) const
+AdjacencyList Network::ToAdjacencyList(Float*& Tcount) const
 {
     // Generate coupling
     AdjacencyList list;
 	list.indices = indices;
 	list.offset_in_indices = offset_in_indices;
-
-	if (use_weights)
-		list.weights = thrust::device_vector<Float>(list.indices.size(), (Float)1);
 
     // Calculate numer of upstream neurons for each neuron based on synaptic coupling
 	int N = offset_in_indices.size() - 1;
@@ -20,18 +17,80 @@ AdjacencyList Network::ToAdjacencyList(Float*& Tcount, bool use_weights) const
 		return {};
 	}
 
-	double avg_num_conns = 0;
-	for (int i = 1; i < offset_in_indices.size(); ++i)
-		avg_num_conns += offset_in_indices[i] - offset_in_indices[i - 1];
-	std::cout << "Average number of connections: " << avg_num_conns / (offset_in_indices.size() - 1) << std::endl;
-
     thrust::host_vector<Float> Tcount_cpu(N, 0);
 	for (int ind : indices)
 		++Tcount_cpu[ind];
-	gpuErrchk(cudaMemcpy(Tcount, Tcount_cpu.data(), N * sizeof(Float), cudaMemcpyHostToDevice));
+	cudaMemcpy(Tcount, Tcount_cpu.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
 
     std::cout << "Converted connectivity to adjacency list" << std::endl;
     return list;
+}
+
+ChunkedAdjacencyList Network::ToChunkedAdjacencyList(Float*& Tcount) const
+{
+	// Generate coupling
+	ChunkedAdjacencyList list;
+	int N = offset_in_indices.size() - 1;
+	if (N == -1)
+	{
+		std::cerr << "Connectivity is empty. Returning blank list." << std::endl;
+		return {};
+	}
+
+	// Calculate numer of upstream neurons for each neuron based on synaptic coupling
+	thrust::host_vector<Float> Tcount_cpu(N, 0);
+	for (int ind : indices)
+		++Tcount_cpu[ind];
+	cudaMemcpy(Tcount, Tcount_cpu.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+	// Copy indices into chunks.
+	thrust::host_vector<thrust::host_vector<int>>
+		indices_chunked(NCHUNKS), offset_in_indices_chunked(NCHUNKS, thrust::host_vector<int>(N+1,0));
+
+	for (int i = 1; i < N + 1; ++i)
+	{
+		// Initialize i'th element of each offsets for each chunk to (i-1)'th element.
+		for (auto& inds_chunk : offset_in_indices_chunked)
+			inds_chunk[i] = inds_chunk[i - 1];
+
+		// Copy downstream connections from i'th element to respective chunks.
+		for (int j = offset_in_indices[i - 1]; j < offset_in_indices[i]; ++j)
+		{
+			int const ds_idx = indices[j];
+			int const ds_chunk = ds_idx / N_PER_CHUNK;
+			indices_chunked[ds_chunk].push_back(ds_idx % N_PER_CHUNK);
+			offset_in_indices_chunked[ds_chunk][i] += 1;
+		}
+	}
+
+	// Copy chunked connections to GPU as int double pointer.
+	// First, make nested host_vectors into int* pointer on GPU.
+	thrust::host_vector<int*> raw_indices_chunked(NCHUNKS), raw_offset_in_indices_chunked(NCHUNKS);
+	for (int i = 0; i < NCHUNKS; ++i)
+	{
+		int sz = indices_chunked[i].size() * sizeof(int);
+		cudaMalloc(&(raw_indices_chunked[i]), sz);
+		cudaMemcpy(raw_indices_chunked[i], indices_chunked[i].data(), sz, cudaMemcpyHostToDevice);
+
+		sz = offset_in_indices_chunked[i].size() * sizeof(int);
+		cudaMalloc(&(raw_offset_in_indices_chunked[i]), sz);
+		cudaMemcpy(raw_offset_in_indices_chunked[i], offset_in_indices_chunked[i].data(), sz, cudaMemcpyHostToDevice);
+	}
+
+	// Second, copy outer host_vector to device_vector on GPU.
+	list.indices_chunks = raw_indices_chunked;
+	list.offset_in_indices_chunks = raw_offset_in_indices_chunked;
+	std::cout << "Converted connectivity to chunked adjacency list" << std::endl;
+	return list;
+}
+
+CuSparseAdjacencyMatrix Network::ToUpstreamSparseMatrix(cusparseHandle_t& handle, AdjacencyList& list) const
+{
+	// Since CuSparseAdjacencyMatrix is CSC format, and a column of the matrix contains downstream neurons, 
+	// we don't need to do any conversion stuff, yay! 
+	CuSparseAdjacencyMatrix mat{ handle, list };
+	mat.vals.resize(list.indices.size(), 1);
+	return mat;
 }
 
 bool UniformRandomNetwork::Generate(int const N)
@@ -48,6 +107,7 @@ bool UniformRandomNetwork::Generate(int const N)
 	{
         if (i % 1000 == 0)
             std::cout << i / (float)N * 100 << "%\r" << std::flush;
+
 		thrust::fill_n(neuron_downstream.begin(), Ncouple, INT_MAX);
 		for (int j = 0; j < Ncouple; ++j)
 		{
@@ -89,51 +149,6 @@ bool KNNNetwork::Generate(int const N)
         offset_in_indices[n + 1] = offset_in_indices[n] + k;
     }
     std::cout << "100%\r" << std::endl;
-	return true;
-}
-
-bool NormalNetwork::Generate(int const N)
-{
-    std::cout << "Generating connections... " << std::endl;
-    std::vector<int> ball(N); 
-    std::vector<ANNdist> ball_dists(N);
-    auto& gen{ Utility::UnseededRandomEngine() };
-
-    indices.reserve(N * 100);
-    offset_in_indices.resize(N + 1, 0);
-    ANNdist const variance = stddev * stddev;
-	ANNdist const normal_dist_scalar = 1.0 / (stddev * sqrt(2.0 * 3.14159265359));
-    std::uniform_real_distribution<ANNdist> unit_dist(0.0, normal_dist_scalar);
-    int ball_sz_sum{ 0 };
-    for (int from_idx = 0; from_idx < N; ++from_idx)
-    {
-        if (from_idx % 1000 == 0)
-        {
-            std::cout << from_idx / (float)N * 100 << "%\r";
-            std::cout.flush();
-        }	
-
-		int ball_sz{ morphology_handle->WithinBall(from_idx, n_stddevs * stddev, N, ball, ball_dists) };
-        ball_sz_sum += ball_sz;
-
-		int n_inds_prev = indices.size();
-        for (int i = 1; i < ball_sz; ++i)
-        {
-            // Calculate normal distribution weight
-            ANNdist prob{ normal_dist_scalar * std::exp(-ball_dists[i] / (2 * variance)) };
-            ANNdist unit_sample = unit_dist(gen);
-
-			// We have prob chance of this condition being true, so the distribution of points will be normal.
-            if (unit_sample < prob)
-                indices.push_back(ball[i]);
-        }
-        offset_in_indices[from_idx + 1] = indices.size();
-    }
-    std::cout << "100%\r" << std::endl;
-
-    indices.shrink_to_fit(); // Shrink capacity
-    std::cout << "Average number of connections: " << indices.size() / (float)N << std::endl;
-    std::cout << "Average ball size: " << ball_sz_sum / (float)N << std::endl;
 	return true;
 }
 
@@ -183,18 +198,15 @@ bool FileNetwork::GenerateFromHDF(int const N)
 		           + std::to_string(numpnts) + " points available." << std::endl;
 
 	int sparsity{ numpnts / N };
-	indices.reserve(numconns);
-	offset_in_indices.resize(N + 1, 0);
+	indices.resize(numconns);
+	offset_in_indices.resize(numpnts + 1, 0);
+	auto it = indices.begin();
 	for (int from_idx = 0; from_idx < N; ++from_idx)
 	{
 		int const lookup_idx{ from_idx * sparsity };
-		offset_in_indices[from_idx + 1] = offset_in_indices[from_idx];
 		for (int to_idx = row_ptr[lookup_idx]; to_idx < row_ptr[lookup_idx + 1]; ++to_idx)
 			if (col_idx[to_idx] % sparsity == 0)
-			{
-				indices.push_back(col_idx[to_idx] / sparsity);
-				offset_in_indices[from_idx + 1] += 1;
-			}
+				*it++ = col_idx[to_idx] / sparsity;
+		offset_in_indices[from_idx + 1] = it - indices.begin();
 	}
-	indices.shrink_to_fit();
 }

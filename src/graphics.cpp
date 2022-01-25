@@ -71,19 +71,16 @@ struct
     glm::mat4 view{ glm::mat4(1.0f) }, model{ glm::mat4(1.0f) }, projection{ glm::mat4(1.0f) };
     glm::vec2 mouse{0.0f, 0.0f};
     glm::vec2 theta{0.0f, 0.0f};
-    bool pause{ false }, rotate{ false }, replay{ false };
+    bool pause{ false }, rotate{ true }, replay{ false };
     glm::vec3 world_min, world_max;
     int draw_mode = 0;
-    GLfloat color_divisor = 15;
-    GLfloat color_offset = -65;
-    GLfloat color_cutoff = 0;
 
     ReplayBuffer replay_buffer; // Used for replaying video 
 
     // Locations of stuff
     GLint voltage_loc, pos_loc, tex_coord_loc; // attributes 
     GLint p_mat_loc, v_mat_loc, m_mat_loc, sampler_loc; // uniforms
-    GLint render_lines_loc, color_divisor_loc, color_offset_loc, color_cutoff_loc;
+    GLint render_lines_loc;
 
     GLuint pos_buff, voltage_buff, tex_coord_buff, line_buff;
 
@@ -316,10 +313,6 @@ bool render (float const* voltages, void const* slice, int const slice_width, in
     glUniformMatrix4fv(g_attrs.m_mat_loc, 1, GL_FALSE, glm::value_ptr(g_attrs.model));
     glUniformMatrix4fv(g_attrs.v_mat_loc, 1, GL_FALSE, glm::value_ptr(g_attrs.view));
 
-    glUniform1f(g_attrs.color_divisor_loc, g_attrs.color_divisor);
-    glUniform1f(g_attrs.color_offset_loc, g_attrs.color_offset);
-    glUniform1f(g_attrs.color_cutoff_loc, g_attrs.color_cutoff);
-
     if (g_attrs.draw_mode > 0 && !g_attrs.lines.empty())
     {
 		// Draw the connectivity.
@@ -367,21 +360,6 @@ bool render (float const* voltages, void const* slice, int const slice_width, in
     return pause;
 }
 
-void set_color_params(float divisor, float offset, float cutoff)
-{
-    g_attrs.color_divisor = divisor;
-    g_attrs.color_offset = offset;
-    g_attrs.color_cutoff = cutoff;
-
-    glUniform1f(g_attrs.color_divisor_loc, g_attrs.color_divisor);
-    glUniform1f(g_attrs.color_offset_loc, g_attrs.color_offset);
-    glUniform1f(g_attrs.color_cutoff_loc, g_attrs.color_cutoff);
-}
-
-float get_color_divisor() { return g_attrs.color_divisor; }
-float get_color_offset() { return g_attrs.color_offset; }
-float get_color_cutoff() { return g_attrs.color_cutoff; }
-
 void keyCallback(GLFWwindow* window, int key, int, int action, int)
 { 
 #if 0 // Movement. Disabled for now. 
@@ -415,44 +393,6 @@ void keyCallback(GLFWwindow* window, int key, int, int action, int)
     }
     else if (key == GLFW_KEY_R && action == GLFW_PRESS)
         g_attrs.rotate = !g_attrs.rotate; // Toggle rotation
-
-    else if (key == GLFW_KEY_LEFT_BRACKET && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_divisor -= 0.1;
-        std::cout << "Color divisor changed: " << g_attrs.color_divisor << std::endl;
-        glUniform1f(g_attrs.color_divisor_loc, g_attrs.color_divisor);
-    }
-    else if (key == GLFW_KEY_RIGHT_BRACKET && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_divisor += 0.1;
-        std::cout << "Color divisor changed: " << g_attrs.color_divisor << std::endl;
-        glUniform1f(g_attrs.color_divisor_loc, g_attrs.color_divisor);
-    }
-    else if (key == GLFW_KEY_SEMICOLON && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_offset -= 0.1;
-        std::cout << "color offset changed: " << g_attrs.color_offset << std::endl;
-        glUniform1f(g_attrs.color_offset_loc, g_attrs.color_offset);
-    }
-    else if (key == GLFW_KEY_APOSTROPHE && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_offset += 0.1;
-        std::cout << "color offset changed: " << g_attrs.color_offset << std::endl;
-        glUniform1f(g_attrs.color_offset_loc, g_attrs.color_offset);
-    }
-    else if (key == GLFW_KEY_COMMA && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_cutoff -= 0.01;
-        std::cout << "Color cutoff changed: " << g_attrs.color_cutoff << std::endl;
-        glUniform1f(g_attrs.color_cutoff_loc, g_attrs.color_cutoff);
-    }
-    else if (key == GLFW_KEY_PERIOD && (action == GLFW_PRESS || action == GLFW_REPEAT))
-    {
-        g_attrs.color_cutoff += 0.01;
-        std::cout << "Color cutoff changed: " << g_attrs.color_cutoff << std::endl;
-        glUniform1f(g_attrs.color_cutoff_loc, g_attrs.color_cutoff);
-    }
-
     else if (g_attrs.pause && key == GLFW_KEY_T && action == GLFW_PRESS) // Can only replay when paused! 
     {
         g_attrs.replay = !g_attrs.replay; // Toggle replay
@@ -518,9 +458,6 @@ int setup(float*& voltages, float const* positions, size_t N, size_t render_N)
         g_attrs.v_mat_loc = glGetUniformLocation(g_attrs.shaderProgram, "vMat");
         g_attrs.m_mat_loc = glGetUniformLocation(g_attrs.shaderProgram, "mMat");
         g_attrs.render_lines_loc = glGetUniformLocation(g_attrs.shaderProgram, "render_lines");
-        g_attrs.color_divisor_loc = glGetUniformLocation(g_attrs.shaderProgram, "color_divisor");
-        g_attrs.color_cutoff_loc = glGetUniformLocation(g_attrs.shaderProgram, "color_cutoff");
-        g_attrs.color_offset_loc = glGetUniformLocation(g_attrs.shaderProgram, "color_off");
         g_attrs.tex_coord_loc = glGetAttribLocation(g_attrs.tex_shaderProgram, "tex_coords");
         g_attrs.sampler_loc = glGetUniformLocation(g_attrs.tex_shaderProgram, "tex");
 

@@ -1,536 +1,541 @@
-#include "mouse_cortex.cuh"
+#include "network_factory.cuh"
 #include "graphics.h"
-#include <set>
+#include "morphology.h"
+#include "ephys.cuh"
+#include "circadian.h"
+#include "paracrine.cuh"
+#include "electrode_net.cuh"
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <chrono>
-#include "regions_tree.h"
-#include "hebbian.cuh"
 
-int NumIncsSecond(float dt=HH::leapfrog_dt)
+#define OUTPUT_ELECTRODES_FILE
+
+// This is simply a struct that contains all the relevant stuff for coupling. 
+// It can be called which will perform coupling and store it. 
+// Description:
+// - list Adjacency list containing connectivity.
+// - coupling Coupling class that can be called to do coupling with a variety of connectivity structs.
+// - downstream_inputs Input to downstream neurons after coupling.
+// - neuron_outputs Output of neurons.
+struct CouplingStruct 
 {
-    return int(1000 / dt); 
-}
-
-void ElectrodesExample(int N)
-{
-    MouseCortex mouse_cortex(N);
-
-    int KNN_value = 1000;
-
-    // Setup 5 electrodes.
-    std::vector<int> electrode_inds = { 0, 1, 2, 3, N - 1 };
+    ChunkedAdjacencyList& list;
+    AtomicCoupling& coupling;
+    Float* downstream_inputs;
+    Float* neuron_outputs;
     
-    // Generate spherical regions at indices.
-    thrust::host_vector<int> h_regions, h_regions_inds;
-    mouse_cortex.morphology->GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, KNN_value);
-
-    // Construct ElectrodeNet class.
-    ElectrodeNet electrode_net(h_regions, h_regions_inds);
-
-    // Get pointer to voltages. 
-    Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
-
-    // Output file.
-    std::ofstream fout("ELECTRODES_OUT.txt");
-    for(int i = 0; i < NumIncsSecond() * 3; ++i)
+    // Performs coupling and stores results in downstream_inputs. 
+    // Returns number of neurons firing.
+    int operator() () 
     {
-        mouse_cortex.Simulate();
-
-        // Measure average for each individual electrode.
-        electrode_net.DoElectrodeMeasurements(V_ptr, mouse_cortex.white_ampa_connectivity->is_firing);
-
-        // Write electrode measurements to file.
-        Float const* handle = electrode_net.ElectrodeOutputHandle();
-        for (int j = 0; j < electrode_inds.size(); ++j)
-            fout << handle[j] << ',';
-        fout << std::endl;
+        return coupling(list, downstream_inputs, neuron_outputs);
     }
-    fout.close();
+};
+
+void set_scn_egaba(Float* const d_egaba, Morphology* morphology, int const N, bool left, bool right)
+{
+    static const std::vector<double> egaba_key{ -79.4000, -77.7000, -76.0000, -74.3000, -72.7000, -71.0000, -69.3000, -67.6000, -65.9000, -64.3000, -62.6000, -60.9000, -59.2000, -57.5000, -55.9000, -54.2000, -52.5000, -50.8000, -49.1000, -47.5000, -45.8000, -44.1000, -42.4000, -40.7000, -39.1000, -37.4000, -35.7000, -34.0000, -32.3000 };
+    static const std::vector<double> cum_dist{ 0.0040, 0.0091, 0.0111, 0.0152, 0.0233, 0.0273, 0.0385, 0.0607, 0.0860, 0.1093, 0.1387, 0.1771, 0.2156, 0.2713, 0.3411, 0.4322, 0.5202, 0.6093, 0.7085, 0.7874, 0.8330, 0.8877, 0.9281, 0.9565, 0.9717, 0.9787, 0.9909, 0.9949, 1.0000 };
+
+    // We split up the distribution into two parts. Those with y less than some y value have inhibitory egaba and those above are selected from the rest of the distribution. 
+    // The left lobe of the SCN has less inhibitory neurons, so we set slice to be lower if we are just using the left lobe than the right. 
+    static const double left_slice{ -71.0 }, right_slice{ -59.0 }, avg_slice{ (left_slice + right_slice) * 0.5 };
+    double slice{ avg_slice };
+    if (!right)
+        slice = left_slice;
+    else if (!left)
+        slice = right_slice;
+    std::cout << 0 << std::endl;
+
+    int const idx{ (int)(std::lower_bound(egaba_key.begin(), egaba_key.end(), slice) - egaba_key.begin()) };
+    int const num_below = cum_dist[idx] * N;
+    std::vector<std::pair<int, float>> sorted_by_y_val(N);
+    auto const& positions{ morphology->GetPositions() };
+    for (int i = 0; i < N; ++i)
+        sorted_by_y_val[i] = { i, positions[i].y };
+    std::sort(sorted_by_y_val.begin(), sorted_by_y_val.end(), [](std::pair<int, float> lhs, std::pair<int, float> rhs) {return lhs.second < rhs.second; });
+    std::cout << 0 << std::endl;
+
+    // First sample inhibitory. These are all neurons with y < y[num_below-1].
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine gen(seed);
+    std::uniform_real_distribution<double> dist1(0.0, cum_dist[idx]);
+    std::vector<Float> egaba(N);
+    for (int i = 0; i < num_below; ++i)
+    {
+        double const sample{ dist1(gen) };
+        int const box{ (int)(std::lower_bound(cum_dist.begin(), cum_dist.end(), sample) - cum_dist.begin()) };
+        egaba[sorted_by_y_val[i].first] = egaba_key[box];
+    }
+    std::cout << 0 << std::endl;
+
+    std::uniform_real_distribution<double> dist2(cum_dist[idx], 1.0);
+    for (int i = num_below; i < N; ++i)
+    {
+        double const sample{ dist2(gen) };
+        int const box{ (int)(std::lower_bound(cum_dist.begin(), cum_dist.end(), sample) - cum_dist.begin()) };
+        egaba[sorted_by_y_val[i].first] = egaba_key[box];
+    }
+    std::cout << 0 << std::endl;
+    cudaMemcpy(d_egaba, egaba.data(), sizeof(Float) * N, cudaMemcpyHostToDevice);
 }
 
-void VisualizationTest(int N, int render_N=-1, int electrodeK=10)
+void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream& fout,
+    int const N, thrust::device_vector<Float*>& sim_vars,  thrust::host_vector<Float*>& sim_vars_cpu,
+    Ephys* ephys,
+    std::vector<CouplingStruct>& coupling_structs,
+    Float* V_ptr,
+    float* graphics_voltages_handle = nullptr, int const render_N = -1,
+    ElectrodeNet* electrodes = nullptr,
+    ParacrineModule* paracrine = nullptr,
+    const float circadian_time = 0.0f,
+    const Circadian* circadian = nullptr)
 {
-    if (render_N < 0)
-        render_N = N;
+    std::cout << " HI2" << std::endl;
+    // If graphics handle is non-null, allocate CPU mem to copy voltages to.
+    uint8_t* frame_data;
+    FILE* replay_out;
+    bool pause{ false };
+    graphics_voltages_handle = false;
+    if (graphics_voltages_handle)
+    {
+        frame_data = (uint8_t*)malloc(3 * sizeof(uint8_t) * Graphics::get_width() * Graphics::get_height());
+        replay_out = fopen("REPLAY.raw", "wb");
+    }
+    float* slice = nullptr;
+    if (paracrine) // If using paracrine signalling, display slice.
+        slice = paracrine->get_grid().density().slice(Graphics::get_slice_index()).as(f32).host<float>();
 
-    MouseCortex mouse_cortex(N);
-    std::vector<int> electrode_inds(render_N);
-    int const render_stride = N / render_N;
+    
+    for (int i = 0; i < nincs; ++i)
+    {
 
-    // Generate electrodes by sampling render_N neurons uniformly from the N and creating electrodes at every such neuron.
-    for (int i = 0; i < render_N; ++i)
-        electrode_inds[i] = render_stride * i;
-    thrust::host_vector<int> h_regions, h_regions_inds;
-    mouse_cortex.morphology->GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, electrodeK);
+       
 
-    ElectrodeNet electrode_net(h_regions, h_regions_inds);
-    Float const* avg_V_handle = electrode_net.ElectrodeOutputHandle();
-    Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
+        Float sim_time = i * diekman_params::leapfrog_dt;
+
+        if (fmod(sim_time, 1000.0f) < diekman_params::leapfrog_dt) 
+        {
+            Float sim_time_hr = sim_time / (1000*3600);
+
+            std::vector<float> gk_pair = circadian->get_params_at_time(circadian_time+sim_time_hr);
+            std::cout << circadian_time + sim_time_hr << " " << gk_pair[0] << " " << gk_pair[1] << std::endl;
+            thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKCA]), N, gk_pair[0]);
+            thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKLEAK]), N, gk_pair[1]);
+        }
+
+        if (i % (nincs / 100) == 0)
+            std::cout << 100 * (i / (float)nincs) << "%" << std::endl;
+
+        if (i % print_incs == 0)
+        {
+            electrodes->DoElectrodeMeasurements(V_ptr);
+            Float const* avg_V_handle = electrodes->ElectrodeOutputHandle();
+#ifdef OUTPUT_ELECTRODES_FILE
+            for (int k = 0; k < render_N; ++k)
+                fout << avg_V_handle[k] << ','; //which neurons to sample
+#endif
+            fout << ElectrodeNet::MeasureAverageEntireNetwork(V_ptr, N);
+            fout << std::endl;
+            // Update graphics if the graphics handle is non-null
+            if (graphics_voltages_handle)
+            {
+                electrodes->DoElectrodeMeasurements(V_ptr);
+                Float const* avg_V_handle = electrodes->ElectrodeOutputHandle();
+                for (int k = 0; k < render_N; ++k)
+                    graphics_voltages_handle[k] = avg_V_handle[k];
+
+                int slice_index;
+                slice_index = Graphics::get_slice_index();
+                if (paracrine)
+                    paracrine->get_grid().density().slice(slice_index % paracrine->z_gridcount).as(f32).host(slice);
+                pause = Graphics::render(graphics_voltages_handle, slice, paracrine->x_gridcount, paracrine->y_gridcount, pause);
+            }
+        }
+
+        if (pause)
+        {
+            i -= 1;
+            continue;
+        }
+
+        // Perform coupling. The number of neurons firing is returned by each of these calls. 
+        int n_firing;
+        for(auto& coup_struct: coupling_structs)
+            n_firing = coup_struct();
+
+        if (paracrine)
+        {
+            if(i% paracrine->timescale == 0)
+                paracrine->update_on_own_timescale();
+            else 
+                paracrine->update_on_fine_timescale(coupling_structs[0].coupling);
+        }
+
+
+        // Update electrophysiology.
+        ephys->SimulateEphys(thrust::raw_pointer_cast(sim_vars.data()));
+    }
+
+    if (graphics_voltages_handle)
+    {
+        free(frame_data);
+        fclose(replay_out);
+    }
+}
+
+bool length_predicate(float const* p1, float const* p2)
+{
+	return true;
+}
+
+// N : number of neurons to simulate
+// samp_freq : sampling frequency (Hz)
+// samp_len : How long you record the activity of the model neuron (sec)
+void sanmodel_inhexc_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_len = 10, int render_N = -1)
+{
+    // Set up graphics and morphology
+    FileMorphology morphology("cortex_connectivity_1m_1k_inh.h5");
+    morphology.Generate(N);
 
     float* graphics_voltage_handle;
-    Graphics::setup(graphics_voltage_handle, mouse_cortex.morphology->GetPositionsRaw(), N, render_N);
-    // Hodgkin-Huxley normalized coloring.
-    Graphics::set_color_params(15, -60, 0.0);
+    Graphics::setup(graphics_voltage_handle, morphology.GetPositionsRaw(), N, render_N);
 
-    // Use super-regions at a specific depth in the regions json tree.
-    int visual_region_idx;
-    thrust::host_vector<int> h_regions_allen, h_regions_inds_allen, associated_ids;
-    try
+    // Set up simulation variables. Stored in a struct of arrays.
+    thrust::host_vector<Float*> sim_vars_cpu(NUM_AN_IE_VAR);
+    thrust::device_vector<Float*> sim_vars;
+    std::ofstream fout("OUT_AN.txt");
     {
-        RegionsTree tree("CUBIC_regionID_lookup_no_comma.json");
-        mouse_cortex.morphology->SpecfiyRegionsDepth(6, tree);
-        mouse_cortex.morphology->GenRegionsFromIDs(h_regions_allen, h_regions_inds_allen, associated_ids);
+        thrust::host_vector<Float> cpu_arr(N, 0);
 
-        // Find region corresponding to the visual region in h_regions.
-        int ID = tree.GetIdOfRegionByName("VIS");
-        std::cout << "Visual region ID: " << ID << std::endl;
-        visual_region_idx = std::find(associated_ids.begin(), associated_ids.end(), ID) - associated_ids.begin();
+        for (Float*& arr : sim_vars_cpu)
+            cudaMalloc(&arr, N * sizeof(Float));
 
-        // Set applied current to zero everywhere but the visual regions.
-        thrust::host_vector<Float> appcur(N, 2);
-        for (int i = h_regions_inds_allen[visual_region_idx]; i < h_regions_inds_allen[visual_region_idx + 1]; ++i)
-            appcur[h_regions_allen[i]] = 7;
-        thrust::device_vector<Float> d_appcur(appcur);
-        thrust::copy_n(d_appcur.begin(), N, thrust::device_ptr<Float>(mouse_cortex.ephys->SimVarsCpu()[HH::Params::APPCUR]));
+        // Set voltages randomly
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::normal_distribution<> voltage_dist(-80, 20);
+        for (auto& val : cpu_arr)
+            val = voltage_dist(gen);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_V], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // Set Ca 
+        std::uniform_real_distribution<> Ca_dist(0.1, 0.5);
+        for (auto& val : cpu_arr)
+            val = Ca_dist(gen);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_CA], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // Set potasium gating variable 
+        std::uniform_real_distribution<> nK_dist(0.0, 0.5);
+        for (auto& val : cpu_arr)
+            val = nK_dist(gen);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_NK], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        thrust::fill_n(cpu_arr.begin(), N, 0.0);
+        // AMPA/NMDA gating variable
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_YE], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // GABA gating variable
+
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_YI], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // No neurotransmitter input/output. Connection counts are set to zero for now and edited below. 
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_EOUTPUT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_EIN], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_ECOUNT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_IOUTPUT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_IIN], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[AN_IE_VAR_ICOUNT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
     }
-    catch (std::runtime_error& e)
+    // Copy pointers from CPU to GPU 
+    sim_vars = sim_vars_cpu;
+
+    // Setup ephys.
+    SANEphys ephys(N);
+
+    // Generate coupling 
+    AtomicCoupling e_coupling(N), i_coupling(N);
+    FileNetwork e_net("cortex_connectivity_1m_1k_exc.h5");
+    KNNNetwork  i_net(30, &morphology);
+    e_net.Generate(N); i_net.Generate(N);
+    ChunkedAdjacencyList e_list{ e_net.ToChunkedAdjacencyList(sim_vars_cpu[AN_IE_VAR_ECOUNT]) };
+    ChunkedAdjacencyList i_list{ i_net.ToChunkedAdjacencyList(sim_vars_cpu[AN_IE_VAR_ICOUNT]) };
+    std::vector<CouplingStruct> coupling_structs
     {
-        std::cerr << e.what() << std::endl;
-        exit(1);
-    }
+        {e_list, e_coupling, sim_vars_cpu[AN_IE_VAR_EIN], sim_vars_cpu[AN_IE_VAR_EOUTPUT]},
+        {i_list, i_coupling, sim_vars_cpu[AN_IE_VAR_IIN], sim_vars_cpu[AN_IE_VAR_IOUTPUT]},
+    };
 
-    int switch_incs = NumIncsSecond();
-    bool pause = false;
-    for(int i = 0; i < NumIncsSecond() * 3; ++i)
-    {
-        mouse_cortex.Simulate();
+    // Send the connectivity to graphics.
+    Graphics::load_in_connectivity(
+        e_net.GetCpuIndices().data(),
+        e_net.GetCpuOffsetsIntoIndices().data(),
+        N, 1e5,
+        length_predicate);
 
-        electrode_net.DoElectrodeMeasurements(V_ptr, mouse_cortex.white_ampa_connectivity->is_firing);
-        for (int j = 0; j < h_regions_inds.size() - 1; ++j)
-            graphics_voltage_handle[j] = avg_V_handle[j];
-        Graphics::render(graphics_voltage_handle, nullptr, 0, 0, pause);
-    }
-}
-
-void RecordNumFiring(int N, std::string fl_suffix="")
-{
-    std::ofstream fout("N_FIRING_" + fl_suffix + ".txt");
-    MouseCortex mouse_cortex(N, "HH", false, false);
-    Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
-
-    // Transient.
-    for(int i = 0; i < NumIncsSecond() * 3; ++i)
-        mouse_cortex.Simulate();
-
-    int const n_incs = NumIncsSecond() * 10;
-    std::cout << "\r           ";
-    for (int i = 0; i < n_incs; ++i)
-    {
-        if (i % 1000 == 0)
-            std::cout << "\r" << i / (float)n_incs * 100 << "%";
-        fout << mouse_cortex.Simulate() << '\n';
-    }
-    std::cout << std::endl;
-    fout.close();
-}
-
-/// n_incs_hebbian_sample is the number of simulation increments to do before we output hebbian weights to a file.
-void HebbianLearningExample(int N, int n_incs_hebbian_sample = 1000)
-{
-    MouseCortex::use_weights_network = true;
-
-    // Note we are using uniform random weights here and no local connections.
-    MouseCortex mouse_cortex(N, "SAN", true, false);
-    auto& conns{ mouse_cortex.white_ampa_connectivity->list };
-    auto& is_firing{ mouse_cortex.white_ampa_connectivity->is_firing };
-    auto& firing_inds{ mouse_cortex.white_ampa_connectivity->is_firing };
-    Hebbian heb(300, 0.1, conns.indices.size());
-    thrust::host_vector<Float> h_weights = conns.weights;
-
-    // Transient.
-    for(int i = 0; i < NumIncsSecond() * 3; ++i)
-        mouse_cortex.Simulate();
-
-    int const n_incs = NumIncsSecond() * 10;
-    for (int i = 0; i < n_incs; ++i)
-    {
-        if (i % 1000 == 0)
-            std::cout << "\r" << i / (float)n_incs * 100 << "%";
-
-        // Simulation!
-        mouse_cortex.Simulate();
-
-        // Perform Hebbian update.
-        heb.UpdateWeights(conns, is_firing, firing_inds);
-
-        if (i % n_incs_hebbian_sample == 0)
-        {
-            // Write hebbian weights to a file.
-            std::ofstream fout("HEBBIAN_WEIGHTS_" + std::to_string(i) + ".txt");
-            h_weights = conns.weights;
-            for (auto& weight : h_weights)
-                fout << weight << ',';
-            fout.close();
-        }
-    }
-}
-
-// NOTE THAT: this benchmark defaults to using uniform random connections and no gray matter. 
-// These can both be switched so that the gray and white matter are realistic. 
-// For FIGURE 2.
-void SweepBenchmark(std::vector<int> const& choices_of_N, bool uniform_random_white=true, bool use_gray=false)
-{
-    std::ofstream fout("HH_VARIED_N_OUT.csv");
-    int n_incs = NumIncsSecond();
-    for (int N : choices_of_N)
-    {
-        {
-            std::cout << "N " << N << std::endl;
-            MouseCortex mouse_cortex(N, "HH", uniform_random_white, use_gray);
-
-            // Start of simulation.
-            auto start = std::chrono::steady_clock::now();
-            for (int i = 0; i < n_incs; ++i)
-                mouse_cortex.Simulate();
-            auto stop = std::chrono::steady_clock::now();
-
-            // Measure elapsed time and write to row of file in format <N> <TIME>
-            float time = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() / 1000.0f;
-            fout << N << ',' << time << std::endl;
-        }
-    }
-    fout.close();
-}
-
-// Generate some examples exhibiting waves in the 3D visualization. 
-// N is number of neurons.
-// render_N is number of neurons to render. If not specified, render_N = N is default.
-// ElectrodeK constrols the number of nearest neighbors for electorde measurements.
-// For FIGURE 3.
-void WavesExamples(int const N, int render_N = -1, int const electrodeK = 1)
-{
-    if (render_N < 0)
-        render_N = N;
-
-    MouseCortex mouse_cortex(N);
-    std::vector<int> electrode_inds(render_N);
-    int const render_stride = N / render_N;
-
-    // Generate electrodes by sampling render_N neurons uniformly from the N and creating electrodes at every such neuron.
-    for (int i = 0; i < render_N; ++i)
-        electrode_inds[i] = render_stride * i;
+    // Setup electrodes randomly distributed.
     thrust::host_vector<int> h_regions, h_regions_inds;
-    mouse_cortex.morphology->GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, electrodeK);
+    std::vector<int> electrode_inds(render_N);
+    for(int i = 0; i < render_N; ++i)
+        electrode_inds[i] = (N / render_N) * i;
+    morphology.GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, 50);
     ElectrodeNet electrode_net(h_regions, h_regions_inds);
-    Float const* avg_V_handle = electrode_net.ElectrodeOutputHandle();
-    Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
+
+    // Note, we multiply by 1000 to convert from sec to ms.
+    int const nincs = (1000 * samp_len / an_ie_params::rk4_dt);
+    int const print_incs = (int)((1000.0 / samp_freq) / an_ie_params::rk4_dt + 0.5);
+    _RunAndPrintSimulation(nincs, print_incs, fout,
+        N, sim_vars, sim_vars_cpu,
+        &ephys, 
+        coupling_structs,
+        sim_vars_cpu[AN_IE_VAR_V],
+        graphics_voltage_handle,
+        render_N,
+        &electrode_net);
+
+    for (Float*& arr : sim_vars_cpu)
+        cudaFree(arr);
+    fout.close();
+}
+
+// N : number of neurons to simulate
+// samp_freq : sampling frequency (Hz)
+// samp_len : How long you record the activity of the model neuron (sec)
+void hh_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_len = 10, int render_N = -1)
+{
+    using namespace hh_params;
+
+    // Set up graphics and morphology
+	FileMorphology morphology("cortex_connectivity_1m_1k_inh.h5");
+    morphology.Generate(N);
+	morphology.Rotate(glm::radians(90.0f), glm::vec3(1, 0, 0));
+	morphology.Rotate(glm::radians(-90.0f), glm::vec3(0, 0, 1));
 
     float* graphics_voltage_handle;
-    Graphics::setup(graphics_voltage_handle, mouse_cortex.morphology->GetPositionsRaw(), N, render_N);
-    // Hodgkin-Huxley normalized coloring.
-    Graphics::set_color_params(15, -60, 0.0);
+    Graphics::setup(graphics_voltage_handle, morphology.GetPositionsRaw(), N, render_N);
 
-    // Use super-regions at a specific depth in the regions json tree.
-    int visual_region_idx;
-    thrust::host_vector<int> h_regions_allen, h_regions_inds_allen, associated_ids;
-    try
+    // Set up simulation variables. Stored in a struct of arrays.
+    thrust::host_vector<Float*> sim_vars_cpu(NUM_SIM_PARAMS);
+    thrust::device_vector<Float*> sim_vars;
+    std::ofstream fout("OUT_HH.txt");
     {
-        RegionsTree tree("CUBIC_regionID_lookup_no_comma.json");
-        mouse_cortex.morphology->SpecfiyRegionsDepth(6, tree);
-        mouse_cortex.morphology->GenRegionsFromIDs(h_regions_allen, h_regions_inds_allen, associated_ids);
+        thrust::host_vector<Float> cpu_arr(N, 0);
 
-        // Find region corresponding to the visual region in h_regions.
-        int ID = tree.GetIdOfRegionByName("AI");
-        std::cout << "Visual region ID: " << ID << std::endl;
-        visual_region_idx = std::find(associated_ids.begin(), associated_ids.end(), ID) - associated_ids.begin();
+        for (Float*& arr : sim_vars_cpu)
+            cudaMalloc(&arr, N * sizeof(Float));
 
-        // Set applied current to zero everywhere but the visual regions.
-        thrust::host_vector<Float> appcur(N, 2);
-        for (int i = h_regions_inds_allen[visual_region_idx]; i < h_regions_inds_allen[visual_region_idx + 1]; ++i)
-            appcur[h_regions_allen[i]] = 7;
-        thrust::device_vector<Float> d_appcur(appcur);
-        thrust::copy_n(d_appcur.begin(), N, thrust::device_ptr<Float>(mouse_cortex.ephys->SimVarsCpu()[HH::Params::APPCUR]));
+        // Set voltages randomly
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::normal_distribution<> voltage_dist(-55, 25);
+        for (auto& val : cpu_arr)
+            val = voltage_dist(gen);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_V], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        thrust::fill_n(cpu_arr.begin(), N, 0.0);
+
+        // Set gating variables  
+        std::normal_distribution<> gating_var_dist(0.0, 0.0);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_M], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        for (auto& val : cpu_arr)
+            val = gating_var_dist(gen);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_N], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        for (auto& val : cpu_arr)
+            val = gating_var_dist(gen);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_H], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        thrust::fill_n(cpu_arr.begin(), N, 0.0);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_LOCAL_Y], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_IY], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_EY], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // No neurotransmitter input/output or connections
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_LOCAL_OUTPUT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_LOCAL_IN], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_LOCAL_COUNT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_IOUTPUT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_IIN], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_ICOUNT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_EOUTPUT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_EIN], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_ECOUNT], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+        // Set applied current
+        thrust::fill_n(cpu_arr.begin(), N, appcur);
+        cudaMemcpy(sim_vars_cpu[SIM_PARAMS_APPCUR], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
     }
-    catch (std::runtime_error& e)
+    // Copy pointers from CPU to GPU 
+    sim_vars = sim_vars_cpu;
+
+    // Setup Ephys.
+    HHEphys ephys(N);
+
+    // Generate coupling
+    AtomicCoupling /*loc_coupling(N),*/ e_coupling(N), i_coupling(N);
+//    KNNNetwork loc_net(500, &morphology);
+//    FileNetwork e_net("cortex_connectivity_1m_1k_exc.h5"), i_net("cortex_connectivity_1m_1k_inh.h5");
+    UniformRandomNetwork e_net(800), i_net(200);
+    /*loc_net.Generate(N);*/ e_net.Generate(N); i_net.Generate(N);
+//    ChunkedAdjacencyList loc_list{ loc_net.ToChunkedAdjacencyList(sim_vars_cpu[SIM_PARAMS_LOCAL_COUNT]) };
+    ChunkedAdjacencyList e_list{ e_net.ToChunkedAdjacencyList(sim_vars_cpu[SIM_PARAMS_ECOUNT]) };
+    ChunkedAdjacencyList i_list{ i_net.ToChunkedAdjacencyList(sim_vars_cpu[SIM_PARAMS_ICOUNT]) };
+    std::vector<CouplingStruct> coupling_structs
     {
-        std::cerr << e.what() << std::endl;
-        exit(1);
-    }
+//        {loc_list, loc_coupling, sim_vars_cpu[SIM_PARAMS_LOCAL_IN], sim_vars_cpu[SIM_PARAMS_LOCAL_OUTPUT]},
+        {e_list, e_coupling, sim_vars_cpu[SIM_PARAMS_EIN], sim_vars_cpu[SIM_PARAMS_EOUTPUT]},
+        {i_list, i_coupling, sim_vars_cpu[SIM_PARAMS_IIN], sim_vars_cpu[SIM_PARAMS_IOUTPUT]}
+    };
 
-    // Simulate and record ERP.
-    std::ofstream fout("N_FIRING_APPCUR.csv");
-    int switch_incs = NumIncsSecond();
-    for (int window = 0; window < 3; ++window)
-    {
-        int n_incs_transient = NumIncsSecond() * 1;
-        int n_incs_record = NumIncsSecond() * 2;
-        float stim = window == 0 ? 0 : (window == 1 ? 5 : 10);
-        float base = window == 0 ? 0 : 3;
-        bool pause = false;
-        for (int i = 0; i < n_incs_transient + n_incs_record; ++i)
-        {
-            thrust::host_vector<Float> appcur(N, base);
-            Float appcur_write = base;
-            if (i % switch_incs == 0)
-                std::cout << "SWITCH : " << (i % (2 * switch_incs)) / switch_incs << ", i = " << i << std::endl;
+    // Send the connectivity to graphics.
+//    Graphics::load_in_connectivity(
+//        loc_net.GetCpuIndices().data(),
+//        loc_net.GetCpuOffsetsIntoIndices().data(),
+//        N, N/10,
+//        length_predicate);
 
-            if((i < n_incs_transient || i % (2 * switch_incs) < switch_incs) && i % (switch_incs / 500) < 2)
-            {
-//                for (int j = h_regions_inds_allen[visual_region_idx]; j < h_regions_inds_allen[visual_region_idx + 1]; ++j)
-//                    appcur[h_regions_allen[j]] = stim;
-                for (int j = 0; j < N; ++j)
-                    if (mouse_cortex.morphology->GetPositions()[j].y > 0.0)
-                        appcur[j] = stim;
-//                thrust::fill_n(appcur.begin(), N, stim);
-                appcur_write = stim;
-            }
-            thrust::device_vector<Float> d_appcur(appcur);
-            thrust::copy_n(d_appcur.begin(), N, thrust::device_ptr<Float>(mouse_cortex.ephys->SimVarsCpu()[HH::Params::APPCUR]));
+    // Setup electrodes based on mouse 2D data from 
+    // https://gin.g-node.org/hiobeen/Mouse_hdEEG_ASSR_Hwang_et_al/src/master/montage.csv.
+    thrust::host_vector<int> h_regions, h_regions_inds;
+    std::vector<int> electrode_inds(render_N);
+    for(int i = 0; i < render_N; ++i)
+        electrode_inds[i] = (N / render_N) * i;
+    morphology.GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, 1);
+    ElectrodeNet electrode_net(h_regions, h_regions_inds);
 
-            fout << mouse_cortex.Simulate() << ',' << appcur_write << '\n';
+    // Note, we multiply by 1000 to convert from sec to ms.
+    int const nincs = (1000 * samp_len / leapfrog_dt);
+    int const print_incs = (int)((1000.0 / samp_freq) / leapfrog_dt + 0.5);
+    _RunAndPrintSimulation(nincs, print_incs, fout,
+        N, sim_vars, sim_vars_cpu,
+        &ephys, 
+        coupling_structs,
+        sim_vars_cpu[SIM_PARAMS_V],
+        graphics_voltage_handle,
+        render_N,
+        &electrode_net);
 
-            if (i > n_incs_transient)
-            {
-                electrode_net.DoElectrodeMeasurements(V_ptr, mouse_cortex.white_ampa_connectivity->is_firing);
-                for (int j = 0; j < h_regions_inds.size() - 1; ++j)
-                    graphics_voltage_handle[j] = avg_V_handle[j];
-                Graphics::render(graphics_voltage_handle, nullptr, 0, 0, pause);
-            }
-        }
-    }
+    for (Float*& arr : sim_vars_cpu)
+        cudaFree(arr);
     fout.close();
 }
 
-// Simulates ERP for three cases: realistic connectivity, realistic short range and uniform long range, and uniform long range. 
-// For FIGURE 4.
-void SimulatedERP(int const N=1e6)
+void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_len = 10, int render_N = -1)
 {
-    MouseCortex::excitatory_conns_file_name = "cortex_connectivity_1m_1k_exc.h5";
-    MouseCortex::inhibitory_conns_file_name = "cortex_connectivity_1m_1k_inh.h5";
+    // Set up graphics and morphology
+	FileMorphology morphology("scn_atlas.h5");
+    morphology.Generate(N);
 
-    // Figure out what the indices of the electrodes should be.
-    thrust::host_vector<int> h_regions, h_regions_inds, associated_ids;
+    float* graphics_voltage_handle;
+    Graphics::setup(graphics_voltage_handle, morphology.GetPositionsRaw(), N, render_N);
 
-    // Regions to sample EEG for. This differs from the above because we want an equal number of neurons per region for EEG.
-    thrust::host_vector<int> eeg_sample_regions, eeg_sample_regions_inds; 
+    // Set up simulation variables. Stored in a struct of arrays.
+    thrust::host_vector<Float*> sim_vars_cpu(NUM_DIEKMAN_VAR);
+    std::ofstream fout("testcircadian3.txt");
     {
-        MouseCortex mouse_cortex(N, "HH", false, false);
-        // Use super-regions at a specific depth in the regions json tree.
-        try
-        {
-            RegionsTree tree("CUBIC_regionID_lookup_no_comma.json");
-            mouse_cortex.morphology->SpecfiyRegionsDepth(6, tree);
-            mouse_cortex.morphology->GenRegionsFromIDs(h_regions, h_regions_inds, associated_ids);
-            
-            // Sample the same number of neurons from each subregion to measure EEG for.
-            int N_sample = INT_MAX;
-            for (int i = 0; i < h_regions_inds.size() - 1; ++i)
-            {
-                if(h_regions_inds[i+1] - h_regions_inds[i] < N_sample)
-                    N_sample = h_regions_inds[i+1] - h_regions_inds[i];
-                if(h_regions_inds[i+1] - h_regions_inds[i] < N_sample)
-                    N_sample = h_regions_inds[i+1] - h_regions_inds[i];
-            }
-            std::cout << "Sampling the first " << N_sample << " neurons from each region" << std::endl;
+        thrust::host_vector<Float> cpu_arr(N, 0);
 
-            eeg_sample_regions.resize((h_regions_inds.size() - 1) * N_sample);
-            eeg_sample_regions_inds.resize(h_regions_inds.size(), 0);
-            for (int i = 0; i < h_regions_inds.size() - 1; ++i)
-            {
-                eeg_sample_regions_inds[i + 1] = eeg_sample_regions_inds[i] + N_sample;
-                for (int j = 0; j < N_sample; ++j)
-                    eeg_sample_regions[eeg_sample_regions_inds[i] + j] = h_regions[h_regions_inds[i] + j];
-            }
-        }
-        catch (std::runtime_error& e)
+        // Set all parameters to zero.
+        for (Float*& arr : sim_vars_cpu)
         {
-            std::cerr << e.what() << std::endl;
-            exit(1);
+            cudaMalloc(&arr, N * sizeof(Float));
+            cudaMemcpy(arr, cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
         }
     }
-    int n_incs_transient = NumIncsSecond() * 3;
-    int n_incs_record = NumIncsSecond() * 1;
+    // Set EGABA
+    set_scn_egaba(sim_vars_cpu[DIEKMAN_VAR_EGABA], &morphology, N, true, true);
 
-    ElectrodeNet electrode_net(eeg_sample_regions, eeg_sample_regions_inds);
-    Float const* avg_V_handle = electrode_net.ElectrodeOutputHandle();
+    // Copy pointers from CPU to GPU 
+    thrust::device_vector<Float*> sim_vars = sim_vars_cpu;
 
-    // Simulate and record the three cases: gray + white, gray + uniform, uniform only.
-    bool use_uniform_white[3]{ false, true, true };
-    bool use_gray[3]{ true, true, false };
-    std::string fout_names[3]{ "ERP_OUT_GRAY_WHITE.csv", "ERP_OUT_GRAY_UNIFORM.csv", "ERP_OUT_UNIFORM.csv" };
-    for(int case_idx = 0; case_idx < 3; ++case_idx)
+    // Setup Ephys.
+    DiekmanEphys ephys(N);
+
+    // Generate coupling
+    AtomicCoupling i_coupling(N);
+    UniformRandomNetwork i_net(100);
+    i_net.Generate(N);
+    ChunkedAdjacencyList i_list{ i_net.ToChunkedAdjacencyList(sim_vars_cpu[DIEKMAN_VAR_ICOUNT]) };
+    std::vector<CouplingStruct> coupling_structs
     {
-        std::cout << " USE UNIFORM : " << use_uniform_white[case_idx] << ", USE GRAY : " << use_gray[case_idx] << std::endl;
-        MouseCortex mouse_cortex(N, "HH", use_uniform_white[case_idx], use_gray[case_idx]);
-        std::ofstream fout(fout_names[case_idx]);
-        Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
+        {i_list, i_coupling, sim_vars_cpu[DIEKMAN_VAR_IIN], sim_vars_cpu[DIEKMAN_VAR_IOUTPUT]}
+    };
 
-        // Set applied current to 6 everywhere.
-        thrust::host_vector<Float> appcur(N, 6);
-        thrust::device_vector<Float> d_appcur(appcur);
-        thrust::copy_n(d_appcur.begin(), N, thrust::device_ptr<Float>(mouse_cortex.ephys->SimVarsCpu()[HH::Params::APPCUR]));
+    // Initialize paracrine signalling. 
+    Float min_dist = morphology.GetMinimumDistance();
+    Float max_dist = morphology.GetMaximumDistance();
+    std::cout <<"min/max distances are"<< min_dist<<" "<< max_dist << std::endl;
 
-        // Transient.
-        for (int i = 0; i < n_incs_transient; ++i)
-            mouse_cortex.Simulate();
+    Float voxel_size = 10 * min_dist;
+    int x_count, y_count, z_count;
+    x_count = y_count = z_count = 2 / voxel_size;
+    std::cout << "x_count is" << x_count << std::endl;
 
-        // Simulate and record ERP.
-        for (int i = 0; i < n_incs_record; ++i)
-        {
-            electrode_net.DoElectrodeMeasurements(V_ptr, mouse_cortex.white_ampa_connectivity->is_firing);
-            mouse_cortex.Simulate();
+    thrust::device_vector<Float> d_coords[3]; 
+    auto const& positions{ morphology.GetPositions() };
 
-            for (int j = 0; j < eeg_sample_regions_inds.size() - 1; ++j)
-                fout << avg_V_handle[j] << ',';
-            fout << '\n';
-        }
-        fout.close();
-    }
-}
-
-// Given connectivity and regions, writes a matrix R to a file 
-// where R_{ij} is the number of connections from region i to region j.
-void EvaluatePhysicalConnectivity(std::string fout_name, 
-    thrust::host_vector<int> const& region_per_neuron, thrust::host_vector<int> const& associated_ids,
-    AdjacencyList const& conns)
-{
-    std::cout << "Writing physical connectivity to file: " << fout_name << "..." << std::endl;
-    std::ofstream fout(fout_name);
-    int N_regions = associated_ids.size();
-    std::vector<std::vector<int>> phys_conns(N_regions, std::vector<int>(N_regions, 0));
-
-    // Copy adjacency list to cpu.
-    thrust::host_vector<int> indices = conns.indices;
-    thrust::host_vector<int> offset_in_indices = conns.offset_in_indices;
-
-    for (int n = 0; n < region_per_neuron.size(); ++n)
     {
-        // Get associated region for this neuron.
-        int reg = std::find(associated_ids.begin(), associated_ids.end(), region_per_neuron[n]) - associated_ids.begin();
-
-        // Iterate over downstream neurons and incremement phys_conns respectively for each region.
-        for (int d = offset_in_indices[n]; d < offset_in_indices[n + 1]; ++d)
+        thrust::host_vector<Float> h_coords[3]; 
+        for (int i = 0; i < 3; ++i)
         {
-            int downstream = indices[d];
-            int downstream_reg = std::find(associated_ids.begin(), associated_ids.end(), region_per_neuron[downstream]) - associated_ids.begin();
-            phys_conns[reg][downstream_reg] += 1;
+            h_coords[i].resize(N);
+            for (int j = 0; j < N; ++j)
+                h_coords[i][j] = positions[j][i];
+            d_coords[i] = h_coords[i];
         }
     }
+
+    //ParacrineModule paracrine(sim_vars_cpu[DIEKMAN_VAR_PARACRINE], 0, 0, 0, 0, diekman_params::leapfrog_dt, 1, 1, 2, 1, 0.1, {}, {}, {});
     
-    // Write physical connectivity to file.
-    for (int i = 0; i < N_regions; ++i)
-    {
-        for (int j = 0; j < N_regions; ++j)
-            fout << phys_conns[i][j] << ',';
-        fout << '\n';
-    }
+    ParacrineModule paracrine(sim_vars_cpu[DIEKMAN_VAR_PARACRINE],N,x_count,y_count,z_count,100*diekman_params::leapfrog_dt,100,0.5,voxel_size,2e-5,3e-4,d_coords[0], d_coords[1], d_coords[2]);
+    std::cout << paracrine.timescale << std::endl;
+
+    // Send the connectivity to graphics.
+//    Graphics::load_in_connectivity(
+//        i_net.GetCpuIndices().data(),
+//        i_net.GetCpuOffsetsIntoIndices().data(),
+//        N, N,
+//        length_predicate);
+
+    // Setup electrodes based on mouse 2D data from 
+    // https://gin.g-node.org/hiobeen/Mouse_hdEEG_ASSR_Hwang_et_al/src/master/montage.csv.
+    thrust::host_vector<int> h_regions, h_regions_inds;
+    std::vector<int> electrode_inds(render_N);
+    for(int i = 0; i < render_N; ++i)
+        electrode_inds[i] = (N / render_N) * i;
+    morphology.GenSphericalRegions(h_regions, h_regions_inds, electrode_inds, 1);//last parameter sets the number of nearest neighbors to sample
+    ElectrodeNet electrode_net(h_regions, h_regions_inds);
+    
+    
+    // Note, we multiply by 1000 to convert from sec to ms.
+    int const nincs = (1000 * samp_len / diekman_params::leapfrog_dt);
+    int const print_incs = (int)((1000.0 / samp_freq) / diekman_params::leapfrog_dt + 0.5);
+
+    Float circadian_time = 10.1;
+    Circadian circadian("../circtable.csv");//initialize circadian class
+
+    _RunAndPrintSimulation(nincs, print_incs, fout,
+        N, sim_vars, sim_vars_cpu,
+        &ephys, 
+        coupling_structs,
+        sim_vars_cpu[DIEKMAN_VAR_V],
+        graphics_voltage_handle,
+        render_N,
+        &electrode_net,
+        nullptr,
+        circadian_time,
+        &circadian);
+
+    for (Float*& arr : sim_vars_cpu)
+        cudaFree(arr);
+    std::cout << "gaga";
     fout.close();
-}
-
-// Record fMRI in regions for use in functional connectivity.
-// A specified region is stimulated.
-// For FIGURE 5-6.
-void FunctionalData(int const N=1e6, std::string stim_region="VIS")
-{
-    MouseCortex::excitatory_conns_file_name = "cortex_connectivity_1m_1k_exc.h5";
-    MouseCortex::inhibitory_conns_file_name = "cortex_connectivity_1m_1k_inh.h5";
-
-    // Figure out what the indices of the electrodes should be.
-    thrust::host_vector<int> h_regions, h_regions_inds, associated_ids;
-
-    // Regions to sample EEG for. This differs from the above because we want an equal number of neurons per region for EEG.
-    thrust::host_vector<int> eeg_sample_regions, eeg_sample_regions_inds; 
-    int stim_region_idx = -1;
-    std::ofstream region_sizes_fout("REGION_SIZES.csv");
-    std::ofstream region_names("REGION_NAMES.txt");
-    {
-        MouseCortex mouse_cortex(N, "HH", false, false);
-
-        // Use super-regions at a specific depth in the regions json tree.
-        try
-        {
-            RegionsTree tree("CUBIC_regionID_lookup_no_comma.json");
-            mouse_cortex.morphology->SpecfiyRegionsDepth(6, tree);
-            mouse_cortex.morphology->GenRegionsFromIDs(h_regions, h_regions_inds, associated_ids);
-
-            // Print region names to file.
-            for (int id : associated_ids)
-                region_names << tree.GetNameOfRegionById(id) << '\n';
-
-            // Find region corresponding to the visual region in h_regions.
-            int ID = tree.GetIdOfRegionByName(stim_region);
-            std::cout << stim_region << " region ID: " << ID << std::endl;
-            stim_region_idx = std::find(associated_ids.begin(), associated_ids.end(), ID) - associated_ids.begin();
-            
-            // Sample the same number of neurons from each subregion to measure EEG for.
-            int N_sample = INT_MAX;
-            for (int i = 0; i < h_regions_inds.size() - 1; ++i)
-            {
-                region_sizes_fout << h_regions_inds[i + 1] - h_regions_inds[i] << '\n';
-                if(h_regions_inds[i+1] - h_regions_inds[i] < N_sample)
-                    N_sample = h_regions_inds[i+1] - h_regions_inds[i];
-                if(h_regions_inds[i+1] - h_regions_inds[i] < N_sample)
-                    N_sample = h_regions_inds[i+1] - h_regions_inds[i];
-            }
-            std::cout << "Sampling the first " << N_sample << " neurons from each region" << std::endl;
-
-            eeg_sample_regions.resize((h_regions_inds.size() - 1) * N_sample);
-            eeg_sample_regions_inds.resize(h_regions_inds.size(), 0);
-            for (int i = 0; i < h_regions_inds.size() - 1; ++i)
-            {
-                eeg_sample_regions_inds[i + 1] = eeg_sample_regions_inds[i] + N_sample;
-                for (int j = 0; j < N_sample; ++j)
-                    eeg_sample_regions[eeg_sample_regions_inds[i] + j] = h_regions[h_regions_inds[i] + j];
-            }
-            EvaluatePhysicalConnectivity("PHYSICAL_CONNECTIVITY.csv", mouse_cortex.morphology->GetRegions(), associated_ids, mouse_cortex.white_ampa_connectivity->list);
-        }
-        catch (std::runtime_error& e)
-        {
-            std::cerr << e.what() << std::endl;
-            exit(1);
-        }
-    }
-    region_sizes_fout.close();
-    region_names.close();
-    int n_incs_transient = NumIncsSecond() * 3;
-    int n_incs_record = NumIncsSecond() * 300;
-
-    ElectrodeNet electrode_net(eeg_sample_regions, eeg_sample_regions_inds);
-    Float const* avg_V_handle = electrode_net.ElectrodeOutputHandle();
-    int const* firing_handle = electrode_net.FiringPerRegionHandle();
-
-    // Run simulation
-    MouseCortex mouse_cortex(N, "HH", false, true);
-    std::ofstream firing_fout("FMRI_" + stim_region + ".csv");
-    Float const* V_ptr = mouse_cortex.ephys->SimVarsCpu()[HH::Params::V];
-
-    // Set applied current to zero everywhere but the stim region.
-    thrust::host_vector<Float> appcur(N, 6);
-    for (int i = h_regions_inds[stim_region_idx]; i < h_regions_inds[stim_region_idx + 1]; ++i)
-        appcur[h_regions[i]] = 10;
-    thrust::device_vector<Float> d_appcur(appcur);
-    thrust::copy_n(d_appcur.begin(), N, thrust::device_ptr<Float>(mouse_cortex.ephys->SimVarsCpu()[HH::Params::APPCUR]));
-
-    // Transient.
-    for (int i = 0; i < n_incs_transient; ++i)
-        mouse_cortex.Simulate();
-
-    // Simulate and record ERP.
-    for (int i = 0; i < n_incs_record; ++i)
-    {
-        electrode_net.DoElectrodeMeasurements(V_ptr, mouse_cortex.white_ampa_connectivity->is_firing);
-        mouse_cortex.Simulate();
-
-        for (int j = 0; j < eeg_sample_regions_inds.size() - 1; ++j)
-            firing_fout << firing_handle[j] << ',';
-        firing_fout << '\n';
-    }
-    firing_fout.close();
 }
 
 int main()
 {
-    FunctionalData(1e6);
-//    ElectrodesExample(1e5);
+    cusparseCreate(&Csr_matrix::handle);
+    int N = 14638;
+    int N_electrodes = 10;
+    diekman_benchmark(N, 2500, 10, N_electrodes);
+    Graphics::terminate_graphics();
 }

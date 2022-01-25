@@ -26,10 +26,24 @@ public:
 	//! Generates an AdjacencyList on the GPU and returns it.
 	/*!
 	  \param [out] Tcount Number of upstream connections per neuron. 
-	  \param [in] use_weights If true, weights are allocated for adjacency list and set to 1.
       \return The adjacency list.
 	*/
-	AdjacencyList ToAdjacencyList(Float*& Tcount, bool use_weights=false) const;
+	AdjacencyList ToAdjacencyList(Float*& Tcount) const;
+
+	//! Generates a ChunkedAdjacencyList on the GPU and returns it.
+	/*!
+	  \param [out] Tcount Number of upstream connections per neuron. 
+      \return The chunked adjacency list.
+	*/
+	ChunkedAdjacencyList ToChunkedAdjacencyList(Float*& Tcount) const;
+
+	//! Generates a CuSparseAdjacencyMatrix on the GPU which gives upstream neuron connections (transpose of downstream).
+	/*!
+	  \param [in, out] handle The cusparse handle to use. 
+	  \param [in, out] list Connectivity stored in AdjacencyList format. 
+      \return The sparse matrix coupling.
+	*/
+	CuSparseAdjacencyMatrix ToUpstreamSparseMatrix(cusparseHandle_t& handle, AdjacencyList& list) const;
 
 	//! Getter for indices on cpu.
 	thrust::host_vector<int> const& GetCpuIndices() const { return indices; }
@@ -65,27 +79,6 @@ public:
 	  \param [in] morphology_handle_ A pointer to the morphology which handles finding neighbors.
 	*/
 	KNNNetwork(int k_, Morphology* morphology_handle_) : k(k_), morphology_handle{ morphology_handle_ } {}
-	virtual bool Generate(int const N) override;
-};
-
-//! Localized coupling where a neuron is connected to a fixed number of neighbors within a certain radius with probability 
-//! given by normal distribution. NOT the same as KNNNetwork! 
-class NormalNetwork : public Network
-{
-protected:
-	Morphology* morphology_handle;
-	Float stddev;
-    int n_stddevs; 
-
-public:
-	/*!
-	  \param [in] morphology_handle_ A pointer to the morphology which handles finding neighbors.
-	  \param [in] stddev_ Standard deviation in world coordinates for normal blobs.
-	  \param [in] max_n_conns_ Number of neurons to couple to per neuron.
-	  \param [in] n_stddevs_ Number of standard deviations to use for connections. Since 95% is within 2 stddevs, this defaults to 2.
-	*/
-	NormalNetwork(Morphology* morphology_handle_, Float stddev_, int n_stddevs_=2) 
-		: morphology_handle{ morphology_handle_ }, stddev{ stddev_ }, n_stddevs{ n_stddevs_ } {}
 	virtual bool Generate(int const N) override;
 };
 

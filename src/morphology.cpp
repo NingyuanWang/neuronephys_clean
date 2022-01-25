@@ -1,10 +1,8 @@
 #define _USE_MATH_DEFINES
 #include "morphology.h"
-#include <set>
 #include <glm/ext.hpp>
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <unordered_map>
 using namespace H5;
 
 void Morphology::Union(Morphology* rhs)
@@ -44,18 +42,6 @@ void Morphology::KNN(ANNpoint pos , int const k, std::vector<int>& knn, std::vec
     if (!kd_tree)
         SetupANN();
 	kd_tree->annkSearch(pos, k, knn.data(), knn_dists.data());
-}
-
-int Morphology::WithinBall(int const n, Float dist_not_sqr, int max_n_conns, std::vector<int>& ball, std::vector<ANNdist>& ball_dists)
-{
-    return WithinBall(glm::value_ptr(positions[n]), dist_not_sqr, max_n_conns, ball, ball_dists);
-}
-
-int Morphology::WithinBall(ANNpoint pos, Float dist_not_sqr, int max_n_conns, std::vector<int>& ball, std::vector<ANNdist>& ball_dists)
-{
-    if (!kd_tree)
-        SetupANN();
-    return kd_tree->annkFRSearch(pos, dist_not_sqr * dist_not_sqr, max_n_conns, ball.data(), ball_dists.data());
 }
 
 void Morphology::GenSphericalRegions(
@@ -144,12 +130,6 @@ std::vector<bool> Morphology::ToBinaryVoxels(glm::uvec3 const& dims) const
     return grid;
 }
 
-void Morphology::ProjectNeuronsToPlane(int dim)
-{
-    for (auto& pos : positions)
-        pos[dim] = 0;
-}
-
 float Morphology::GetMinimumDistance()
 {
     if (!kd_tree)
@@ -167,6 +147,25 @@ float Morphology::GetMinimumDistance()
             min_dist2 = knn_dists[1];
     }
     return sqrt(min_dist2);
+}
+
+float Morphology::GetMaximumDistance()
+{
+    if (!kd_tree)
+        SetupANN();
+
+    std::vector<int> knn(2);
+    std::vector<ANNdist> knn_dists(2);
+    float max_dist2 = FLT_MIN;
+    for (int n = 0; n < positions.size(); ++n)
+    {
+        // Get two nearest neighbors. First nearest neighor is always just the neuron itself.
+        // knn_dists[1] stores squared distance to nearest neuron.
+        KNN(n, 2, knn, knn_dists);
+        if (knn_dists[1] > max_dist2)
+            max_dist2 = knn_dists[1];
+    }
+    return sqrt(max_dist2);
 }
 
 bool HollowSphere::Generate(int const N)
@@ -252,39 +251,9 @@ Float SimpleWrinkledSolidSphere::F(glm::vec3 const& p) const
     return r - cos(phi) * (0.15 * cos(20 * theta) + 0.85);
 }
 
-FileMorphology::FileMorphology(std::string const& fl_name_, bool read_regions_)
-    : fl_name{ "../" + fl_name_ }, format{ fl_name_.substr(fl_name_.find_last_of('.') + 1) }, read_regions{ read_regions_ }
+FileMorphology::FileMorphology(std::string const& fl_name_)
+    : fl_name{ "../" + fl_name_ }, format{ fl_name_.substr(fl_name_.find_last_of('.') + 1) }
 {
-}
-
-void FileMorphology::SpecfiyRegionsDepth(int const depth_in_tree, RegionsTree const& regions_tree)
-{
-    std::cout << "Updating regions depth to be " << depth_in_tree << std::endl;
-
-    // Replace regions with parent regions at depth specified in constructor.
-    std::unordered_map<int, int> node_to_parent;
-    std::set<int> new_unique_regions_set; 
-    try
-    {
-        for (int id : unique_regions)
-        {
-            int parent_at_depth = regions_tree.GetParentRegionAtDepth(id, depth_in_tree);
-            node_to_parent[id] = parent_at_depth;
-            new_unique_regions_set.insert(parent_at_depth);
-        }
-    }
-    catch (std::runtime_error& e)
-    {
-        std::cerr << e.what() << std::endl;
-        exit(1);
-    }
-    // Update regions using map.
-    for (int& id : regions)
-        id = node_to_parent[id];
-
-    // Update unique_regions with new unique regions at specified depth.
-    unique_regions = std::vector<int>(new_unique_regions_set.begin(), new_unique_regions_set.end());
-    std::cout << "Done updating region depth. Number of unique regions at depth: " << unique_regions.size() << std::endl;
 }
 
 bool FileMorphology::Generate(int const N)
@@ -302,14 +271,13 @@ bool FileMorphology::GenerateFromHDF(int const N)
 {
     // First read in three individual axes, then put into positions,
     // finally scale and transform into range [-1, 1].
-    std::vector<float> axes[4];
-    const char* coord_ids[4]{ "/x", "/y", "/z", "/region_id" };
+    std::vector<float> axes[3];
+    static const char* coord_ids[3]{ "/x", "/y", "/z" };
     int numpnts;
-    int n_dims = read_regions ? 4 : 3;
     try
     {
         H5File file(fl_name, H5F_ACC_RDONLY);
-        for (int i = 0; i < n_dims; ++i)
+        for (int i = 0; i < 3; ++i)
         {
             DataSet axis = file.openDataSet(coord_ids[i]);
             numpnts = (int)(axis.getStorageSize() / sizeof(float));
@@ -348,18 +316,6 @@ bool FileMorphology::GenerateFromHDF(int const N)
         positions[i] = { axes[0][j], axes[1][j], axes[2][j] };
     }
 
-    if (read_regions)
-    {
-        regions.resize(N);
-        for (int i = 0; i < N; ++i)
-        {
-            int const j{ stride * i };
-            regions[i] = axes[n_dims - 1][j];
-        }
-        std::set<int> unique_regions_set(regions.begin(), regions.end());
-        unique_regions = std::vector<int>(unique_regions_set.begin(), unique_regions_set.end());
-    }
-
     // Translate so that min is zero.
     Translate(-wmin);
 
@@ -370,33 +326,6 @@ bool FileMorphology::GenerateFromHDF(int const N)
     Translate(glm::vec3(-1));
 
 	return true;
-}
-
-void FileMorphology::GenRegionsFromIDs(thrust::host_vector<int>& h_regions, thrust::host_vector<int>& h_region_inds, thrust::host_vector<int>& associated_ids)
-{
-    if (!kd_tree)
-        SetupANN();
-
-    std::cout << "Generating regions from IDs..." << std::endl;
-    int const N = positions.size();
-	int const N_regions = unique_regions.size();
-    h_regions.resize(N);
-    h_region_inds.resize(N_regions + 1, 0);
-    auto it = h_regions.begin();
-    std::vector<int> sizes;
-    for (int n = 0; n < N_regions; ++n)
-    {
-        int region_id = unique_regions[n];
-        for (int j = 0; j < N; ++j)
-        {
-            if (regions[j] == region_id)
-                *it++ = j;
-        }
-
-        h_region_inds[n + 1] = (it - h_regions.begin());
-        sizes.push_back(h_region_inds[n + 1] - h_region_inds[n]);
-    }
-    associated_ids = unique_regions;
 }
 
 MouseBrain2D::MouseBrain2D(std::string const& bmp_scan_)
