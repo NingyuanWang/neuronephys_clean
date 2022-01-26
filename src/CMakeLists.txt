@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 3.10)
 
-project ("neuronephys" VER 1.0 LANGUAGES CXX CUDA)
+project ("neuronephys" VERSION 1.0 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -22,6 +22,7 @@ ${HDF5_INCLUDE_DIRS}
 ${GLEW_INCLUDE_DIRS}
 ${GLFW_INCLUDE_DIRS}
 ${GLM_INCLUDE_DIRS}
+${ANN_INCLUDE_DIR}
 )
 add_executable(${target} main.cu ${cpp_sources} ${cu_sources})
 target_link_libraries(${target}
