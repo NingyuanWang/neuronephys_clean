@@ -9,15 +9,15 @@
 #  ifndef ANN_EXPORT
 #    ifdef ANN_EXPORTS
         /* We are building this library */
-#      define ANN_EXPORT __attribute__((visibility("default")))
+#      define ANN_EXPORT 
 #    else
         /* We are using this library */
-#      define ANN_EXPORT __attribute__((visibility("default")))
+#      define ANN_EXPORT 
 #    endif
 #  endif
 
 #  ifndef ANN_NO_EXPORT
-#    define ANN_NO_EXPORT __attribute__((visibility("hidden")))
+#    define ANN_NO_EXPORT 
 #  endif
 #endif
 

@@ -1,4 +1,5 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required (VERSION 3.12)
+cmake_policy(VERSION 3.12)
 
 project ("neuronephys" VERSION 1.0 LANGUAGES C CXX CUDA)
 set(CMAKE_CXX_STANDARD 14)
@@ -17,7 +18,12 @@ find_package(GLEW REQUIRED)
 find_package(GLFW REQUIRED)
 find_package(ArrayFire REQUIRED)
 find_package(GLM REQUIRED)#Header only
+find_package(CUDA)
 add_executable(${target} main.cu ${cu_sources} ${cpp_sources})
+#nvcc flags:
+target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    --expt-extended-lambda
+    >)
 target_include_directories(${target} PUBLIC 
 ${ArrayFire_INCLUDE_DIRS}
 ${HDF5_INCLUDE_DIRS}
@@ -25,6 +31,7 @@ ${GLEW_INCLUDE_DIRS}
 ${GLFW_INCLUDE_DIRS}
 ${GLM_INCLUDE_DIRS}
 ${ANN_INCLUDE_DIRS}
+${CUDA_INCLUDE_DIRS}
 )
 target_link_libraries(${target}
 GLEW::GLEW

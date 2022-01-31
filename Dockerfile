@@ -115,7 +115,7 @@ RUN git clone --depth 1 https://github.com/g-truc/glm.git
 #Build ann using Cmake: 
 COPY ann /ann
 RUN cd /ann \
-    && cmake . \
+    && cmake -DCMAKE_BUILD_TYPE=Release . \
     && make ANN
 #Install arrayfire:
 # Setting up symlinks for libcuda and OpenCL ICD

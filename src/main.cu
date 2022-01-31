@@ -96,7 +96,7 @@ void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream&
     uint8_t* frame_data;
     FILE* replay_out;
     bool pause{ false };
-    graphics_voltages_handle = false;
+    graphics_voltages_handle = nullptr;
     if (graphics_voltages_handle)
     {
         frame_data = (uint8_t*)malloc(3 * sizeof(uint8_t) * Graphics::get_width() * Graphics::get_height());

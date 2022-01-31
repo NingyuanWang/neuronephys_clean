@@ -13,9 +13,8 @@ file(GLOB_RECURSE sources ${source_path}/*.cpp)
 #Build options for DLL
 include (GenerateExportHeader)
 #Build library
-add_library(${target} SHARED ${intermediate_headers} ${sources})
+add_library(${target} STATIC ${intermediate_headers} ${sources})
 # Set ouput directory
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib)
 set_target_properties (${target} PROPERTIES 
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/lib )
