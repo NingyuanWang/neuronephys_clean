@@ -253,7 +253,7 @@ Float SimpleWrinkledSolidSphere::F(glm::vec3 const& p) const
 }
 
 FileMorphology::FileMorphology(std::string const& fl_name_)
-    : fl_name{ "../" + fl_name_ }, format{ fl_name_.substr(fl_name_.find_last_of('.') + 1) }
+    : fl_name{ fl_name_ }, format{ fl_name_.substr(fl_name_.find_last_of('.') + 1) }
 {
 }
 

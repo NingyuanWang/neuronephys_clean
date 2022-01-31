@@ -209,7 +209,9 @@ RUN cd /src/neuronephys \
     -DANN_ROOT=/ann \
     -DGLM_ROOT=/glm \
     && cd build \
-    && make
+    && make \
+    && mv neuronephys ../neuronephys
+COPY scn_atlas.h5 /src/neuronephys/scn_atlas.h5
 COPY --from=builder /src/web/dist/ /usr/local/lib/web/frontend/
 COPY rootfs /
 RUN ln -sf /usr/local/lib/web/frontend/static/websockify /usr/local/lib/web/frontend/static/novnc/utils/websockify && \
