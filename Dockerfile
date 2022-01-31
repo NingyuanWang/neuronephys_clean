@@ -101,6 +101,11 @@ RUN git clone --depth 1 --branch 3.3.4 https://github.com/glfw/glfw.git && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j4 && \
     make install
+#Add GLFW dependency: GLU
+RUN apt-get UPDATE \
+    && apt-get install -y --no-install-recommends \
+    && libgl1-mesa-dev \
+    && libglu1-mesa-dev
 # Build GLEW from source
 RUN git clone --depth 1 https://github.com/nigels-com/glew.git && \
     cd glew && \

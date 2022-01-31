@@ -19,7 +19,7 @@ find_package(GLFW REQUIRED)
 find_package(ArrayFire REQUIRED)
 find_package(GLM REQUIRED)#Header only
 find_package(CUDA)
-add_executable(${target} main.cu ${cu_sources} ${cpp_sources})
+add_executable(${target} main.cu)
 #nvcc flags:
 target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
     --expt-extended-lambda
