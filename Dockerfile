@@ -101,11 +101,11 @@ RUN git clone --depth 1 --branch 3.3.4 https://github.com/glfw/glfw.git && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j4 && \
     make install
-#Add GLFW dependency: GLU
-RUN apt-get UPDATE \
+#Add GLFW update: GLU
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-    && libgl1-mesa-dev \
-    && libglu1-mesa-dev
+    libgl1-mesa-dev \
+    libglu1-mesa-dev
 # Build GLEW from source
 RUN git clone --depth 1 https://github.com/nigels-com/glew.git && \
     cd glew && \
@@ -202,13 +202,21 @@ RUN sed -i 's#app/locale/#novnc/app/locale/#' /src/web/dist/static/novnc/app/ui.
 FROM system
 LABEL maintainer="fcwu.tw@gmail.com"
 COPY src /src/neuronephys
+#Build neuronephys:
+RUN cd /src/neuronephys \
+    && cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DANN_ROOT=/ann \
+    -DGLM_ROOT=/glm \
+    && cd build \
+    && make
 COPY --from=builder /src/web/dist/ /usr/local/lib/web/frontend/
 COPY rootfs /
 RUN ln -sf /usr/local/lib/web/frontend/static/websockify /usr/local/lib/web/frontend/static/novnc/utils/websockify && \
     chmod +x /usr/local/lib/web/frontend/static/websockify/run
 
 EXPOSE 80
-WORKDIR /root
+WORKDIR /src/neuronephys
 ENV HOME=/home/ubuntu \
     SHELL=/bin/bash
 HEALTHCHECK --interval=30s --timeout=5s CMD curl --fail http://127.0.0.1:6079/api/health

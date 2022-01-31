@@ -3,6 +3,7 @@
 #include <glm/ext.hpp>
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <algorithm>
 using namespace H5;
 
 void Morphology::Union(Morphology* rhs)

@@ -8,18 +8,19 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(target neuronephys)
 #Sources
 set(source_path ${CMAKE_CURRENT_SOURCE_DIR})
-file(GLOB_RECURSE cpp_sources ${source_path}/*.cpp)
-file(GLOB_RECURSE cu_sources ${source_path}/*.cu EXCLUDE ${source_path}/main.cu)
+file(GLOB cpp_sources ${source_path}/*.cpp)
+file(GLOB cu_sources ${source_path}/*.cu EXCLUDE ${source_path}/main.cu)
 #External libraries:
 list(APPEND CMAKE_MODULE_PATH ${source_path})
 find_package(ANN REQUIRED)
-find_package(HDF5 REQUIRED)
+find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
+find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLFW REQUIRED)
 find_package(ArrayFire REQUIRED)
 find_package(GLM REQUIRED)#Header only
-find_package(CUDA)
-add_executable(${target} main.cu)
+find_package(CUDA COMPONENTS cuSPARSE)
+add_executable(${target} main.cu ${cpp_sources} ${cu_sources})
 #nvcc flags:
 target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
     --expt-extended-lambda
@@ -34,9 +35,11 @@ ${ANN_INCLUDE_DIRS}
 ${CUDA_INCLUDE_DIRS}
 )
 target_link_libraries(${target}
+GL
 GLEW::GLEW
-glfw
-HDF5
+${GLFW_LIBRARIES}
+${HDF5_LIBRARIES}
 ArrayFire::afcuda
 ${ANN_LIBRARIES}
+${CUDA_cusparse_LIBRARY}
 )
