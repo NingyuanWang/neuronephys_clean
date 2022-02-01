@@ -10,7 +10,7 @@ For Windows-based machines, WSL2 backend for docker is used. Either Windows 10 I
 When docker is correctly installed, the image can be built by
 
 ```docker build -t <tag_name> .```
-in the root directory. (Replace ```<tag_name>``` with a name of the image of your choice without the brackets.)
+in the root directory. (Replace ```<tag_name>``` with a name of the image of your choice without the brackets. The process is slow (more than 30 minutes), as Arrayfire is huge, and is built from source.)
 ## Run guide
 With the configuration complete, run
 
