@@ -11,7 +11,7 @@ uniform int render_lines;
 out VS_OUT
 {   
     vec3 position;
-    flat float voltage;
+    smooth float voltage;
 } vs_out;
 
 void main(void)
@@ -22,5 +22,5 @@ void main(void)
     if(render_lines == 1)
         vs_out.voltage = gl_VertexID % 5;
     else
-		vs_out.voltage = voltage;
+        vs_out.voltage = voltage;
 }

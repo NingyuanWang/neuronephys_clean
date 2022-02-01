@@ -21,8 +21,8 @@ Ephys::Ephys(int const N_) : N{ N_ }, random_states(N_)
 {
     // Setup random seeds. 
     init_random<<<NBLOCKS, NTHREADS>>>(0, N, thrust::raw_pointer_cast(random_states.data()));
-	gpuErrchk( cudaPeekAtLastError() );
-	gpuErrchk( cudaDeviceSynchronize() );
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
 }
 
 __global__ void Leapfrog_HH(Float** sim_vars, const int N, const Float timestep, curandState_t* random_states)

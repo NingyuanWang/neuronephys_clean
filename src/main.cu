@@ -7,6 +7,8 @@
 #include "electrode_net.cuh"
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
 
 #define OUTPUT_ELECTRODES_FILE
 
@@ -96,7 +98,7 @@ void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream&
     uint8_t* frame_data;
     FILE* replay_out;
     bool pause{ false };
-    graphics_voltages_handle = nullptr;
+    //graphics_voltages_handle = nullptr;
     if (graphics_voltages_handle)
     {
         frame_data = (uint8_t*)malloc(3 * sizeof(uint8_t) * Graphics::get_width() * Graphics::get_height());
@@ -119,9 +121,10 @@ void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream&
             Float sim_time_hr = sim_time / (1000*3600);
 
             std::vector<float> gk_pair = circadian->get_params_at_time(circadian_time+sim_time_hr);
-            std::cout << circadian_time + sim_time_hr << " " << gk_pair[0] << " " << gk_pair[1] << std::endl;
-            thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKCA]), N, gk_pair[0]);
-            thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKLEAK]), N, gk_pair[1]);
+            //std::cout << circadian_time + sim_time_hr << " " << gk_pair[0] << " " << gk_pair[1] << std::endl;
+            //thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKCA]), N, gk_pair[0]);
+            //thrust::fill_n(thrust::device_ptr<Float>(sim_vars_cpu[DIEKMAN_VAR_GKLEAK]), N, gk_pair[1]);
+            //sim_vars = sim_vars_cpu;
         }
 
         if (i % (nincs / 100) == 0)
@@ -142,8 +145,9 @@ void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream&
             {
                 electrodes->DoElectrodeMeasurements(V_ptr);
                 Float const* avg_V_handle = electrodes->ElectrodeOutputHandle();
-                for (int k = 0; k < render_N; ++k)
-                    graphics_voltages_handle[k] = avg_V_handle[k];
+                std::copy_n(avg_V_handle, render_N, graphics_voltages_handle);
+                //for (int k = 0; k < render_N; ++k)
+                //    graphics_voltages_handle[k] = avg_V_handle[k];
 
                 int slice_index;
                 slice_index = Graphics::get_slice_index();
@@ -186,7 +190,7 @@ void _RunAndPrintSimulation(int const nincs, int const print_incs, std::ostream&
 
 bool length_predicate(float const* p1, float const* p2)
 {
-	return true;
+    return true;
 }
 
 // N : number of neurons to simulate
@@ -305,10 +309,10 @@ void hh_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_
     using namespace hh_params;
 
     // Set up graphics and morphology
-	FileMorphology morphology("cortex_connectivity_1m_1k_inh.h5");
+    FileMorphology morphology("cortex_connectivity_1m_1k_inh.h5");
     morphology.Generate(N);
-	morphology.Rotate(glm::radians(90.0f), glm::vec3(1, 0, 0));
-	morphology.Rotate(glm::radians(-90.0f), glm::vec3(0, 0, 1));
+    morphology.Rotate(glm::radians(90.0f), glm::vec3(1, 0, 0));
+    morphology.Rotate(glm::radians(-90.0f), glm::vec3(0, 0, 1));
 
     float* graphics_voltage_handle;
     Graphics::setup(graphics_voltage_handle, morphology.GetPositionsRaw(), N, render_N);
@@ -422,7 +426,7 @@ void hh_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_
 void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const samp_len = 10, int render_N = -1)
 {
     // Set up graphics and morphology
-	FileMorphology morphology("scn_atlas.h5");
+    FileMorphology morphology("scn_atlas.h5");
     morphology.Generate(N);
 
     float* graphics_voltage_handle;
@@ -430,6 +434,7 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
 
     // Set up simulation variables. Stored in a struct of arrays.
     thrust::host_vector<Float*> sim_vars_cpu(NUM_DIEKMAN_VAR);
+
     std::ofstream fout("testcircadian3.txt");
     {
         thrust::host_vector<Float> cpu_arr(N, 0);
@@ -441,9 +446,40 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
             cudaMemcpy(arr, cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
         }
     }
+    // Set voltages randomly
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::normal_distribution<> voltage_dist(-55, 25);
+    thrust::host_vector<Float> cpu_arr(N, 0);
+    for (auto& val : cpu_arr)
+        val = voltage_dist(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_V], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+    // Set gating variables  
+    std::normal_distribution<> gating_var_dist(0.6, 0.2);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_M], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+    for (auto& val : cpu_arr)
+        val = gating_var_dist(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_N], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+
+    for (auto& val : cpu_arr)
+        val = gating_var_dist(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_P], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+    for (auto& val : cpu_arr)
+        val = gating_var_dist(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_H], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
     // Set EGABA
     set_scn_egaba(sim_vars_cpu[DIEKMAN_VAR_EGABA], &morphology, N, true, true);
 
+    // Set DIEKMAN_VAR_GKCA, DIEKMAN_VAR_GKLEAK
+    std::normal_distribution<> gating_var_gkca(100.0, 0.5);
+    for (auto& val : cpu_arr)
+        val = gating_var_gkca(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_GKCA], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
+    std::normal_distribution<> gating_var_gkleak(0.12, 0.01);
+    for (auto& val : cpu_arr)
+        val = gating_var_gkleak(gen);
+    cudaMemcpy(sim_vars_cpu[DIEKMAN_VAR_GKLEAK], cpu_arr.data(), N * sizeof(Float), cudaMemcpyHostToDevice);
     // Copy pointers from CPU to GPU 
     thrust::device_vector<Float*> sim_vars = sim_vars_cpu;
 
@@ -463,12 +499,12 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
     // Initialize paracrine signalling. 
     Float min_dist = morphology.GetMinimumDistance();
     Float max_dist = morphology.GetMaximumDistance();
-    std::cout <<"min/max distances are"<< min_dist<<" "<< max_dist << std::endl;
+    std::cout <<"min/max distances are "<< min_dist<<" "<< max_dist << std::endl;
 
     Float voxel_size = 10 * min_dist;
     int x_count, y_count, z_count;
     x_count = y_count = z_count = 2 / voxel_size;
-    std::cout << "x_count is" << x_count << std::endl;
+    std::cout << "x_count is " << x_count << std::endl;
 
     thrust::device_vector<Float> d_coords[3]; 
     auto const& positions{ morphology.GetPositions() };
@@ -527,7 +563,7 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
 
     for (Float*& arr : sim_vars_cpu)
         cudaFree(arr);
-    std::cout << "gaga";
+    std::cout << "gaga\n";
     fout.close();
 }
 
@@ -535,7 +571,7 @@ int main()
 {
     cusparseCreate(&Csr_matrix::handle);
     int N = 14638;
-    int N_electrodes = 1000;
+    int N_electrodes = N;
     diekman_benchmark(N, 2500, 100, N_electrodes);
     Graphics::terminate_graphics();
 }

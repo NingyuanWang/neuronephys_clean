@@ -9,9 +9,9 @@ using namespace H5;
 void Morphology::Union(Morphology* rhs)
 {
     std::cout << "Computing union of two morphologies..." << std::endl;
-	size_t cur_size{ positions.size() };
-	positions.resize(cur_size + rhs->positions.size());
-	std::copy(rhs->positions.begin(), rhs->positions.end(), positions.begin() + cur_size);
+    size_t cur_size{ positions.size() };
+    positions.resize(cur_size + rhs->positions.size());
+    std::copy(rhs->positions.begin(), rhs->positions.end(), positions.begin() + cur_size);
 }
 
 void Morphology::Translate(glm::vec3 const& translate)
@@ -42,7 +42,7 @@ void Morphology::KNN(ANNpoint pos , int const k, std::vector<int>& knn, std::vec
 {
     if (!kd_tree)
         SetupANN();
-	kd_tree->annkSearch(pos, k, knn.data(), knn_dists.data());
+    kd_tree->annkSearch(pos, k, knn.data(), knn_dists.data());
 }
 
 void Morphology::GenSphericalRegions(
@@ -56,16 +56,16 @@ void Morphology::GenSphericalRegions(
     std::vector<int> knn(k+1); 
     std::vector<ANNdist> knn_dists(k+1);
 
-	int const N_regions = electrode_inds.size();
+    int const N_regions = electrode_inds.size();
     h_regions.resize(N_regions * k);
     h_region_inds.resize(N_regions + 1, 0);
     for (int n = 0; n < N_regions; ++n)
     {
-		// Initialize query point. 
-		int const idx = electrode_inds[n];
-	
+        // Initialize query point. 
+        int const idx = electrode_inds[n];
+    
         KNN(idx, k, knn, knn_dists);
-		std::copy(knn.begin(), knn.end(), h_regions.begin() + k * n);
+        std::copy(knn.begin(), knn.end(), h_regions.begin() + k * n);
         h_region_inds[n + 1] = h_region_inds[n] + k;
     }
 }
@@ -82,16 +82,16 @@ void Morphology::GenSphericalRegions(
     std::vector<int> knn(k+1); 
     std::vector<ANNdist> knn_dists(k+1);
 
-	int const N_regions = electrode_positions.size();
+    int const N_regions = electrode_positions.size();
     h_regions.resize(N_regions * k);
     h_region_inds.resize(N_regions + 1, 0);
     for (int n = 0; n < N_regions; ++n)
     {
-		// Initialize query point. 
-		glm::vec3 pos = electrode_positions[n];
-	
+        // Initialize query point. 
+        glm::vec3 pos = electrode_positions[n];
+    
         KNN(glm::value_ptr(pos), k, knn, knn_dists);
-		std::copy(knn.begin(), knn.end(), h_regions.begin() + k * n);
+        std::copy(knn.begin(), knn.end(), h_regions.begin() + k * n);
         h_region_inds[n + 1] = h_region_inds[n] + k;
     }
 }
@@ -116,7 +116,7 @@ void Morphology::SetupANN ()
     ANNpointArray p_vec{ annAllocPts(N, 3) };
     for (int i = 0; i < N; ++i)
         p_vec[i] = glm::value_ptr(positions[i]);
-	kd_tree = std::make_unique<ANNkd_tree>(p_vec, N, 3);
+    kd_tree = std::make_unique<ANNkd_tree>(p_vec, N, 3);
 }
 
 std::vector<bool> Morphology::ToBinaryVoxels(glm::uvec3 const& dims) const
@@ -326,7 +326,7 @@ bool FileMorphology::GenerateFromHDF(int const N)
     // Finally, translate so that min is -1 and everything is in range [-1, 1].
     Translate(glm::vec3(-1));
 
-	return true;
+    return true;
 }
 
 MouseBrain2D::MouseBrain2D(std::string const& bmp_scan_)

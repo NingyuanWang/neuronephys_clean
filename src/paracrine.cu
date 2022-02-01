@@ -295,12 +295,6 @@ void Scatter_grid_converter_3d::interpolate_at_location(thrust::device_vector<Fl
     //grid.data.unlock();
 }
 
-#if USE_DOUBLE_PRECISION
-#define CUSPARSE_GEMV cusparseDcsrmv
-#else
-#define CUSPARSE_GEMV cusparseScsrmv
-#endif //USE_DOUBLE_PRECISION
-
 void Csr_matrix::dense_vector_multiplication(const thrust::device_vector<Float> x, thrust::device_vector<Float>& Ax)
 {
     dense_vector_multiplication(thrust::raw_pointer_cast(x.data()), thrust::raw_pointer_cast(Ax.data()));
@@ -335,7 +329,7 @@ void Csr_matrix::dense_vector_multiplication(const Float* x_ptr, Float* Ax_ptr) 
     cusparseErrchk(cusparseSpMV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, mat_desc, x_vec, &beta, Ax_vec, type, CUSPARSE_CSRMV_ALG1, buffer_size));
     gpuErrchk(cudaDeviceSynchronize());
     cudaMalloc(&d_mv_buffer, *buffer_size);
-    std::wcout << "BUF SIZE " << *buffer_size << std::endl;
+    //std::wcout << "BUF SIZE " << *buffer_size << std::endl;
     delete buffer_size;
     cusparseErrchk(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, mat_desc, x_vec, &beta, Ax_vec, type, CUSPARSE_CSRMV_ALG1, d_mv_buffer));
     gpuErrchk(cudaDeviceSynchronize());
@@ -434,7 +428,7 @@ void Csr_matrix::get_transpose(Csr_matrix& AT) const {
         o_value_ptr, o_row_entrycount_ptr, o_col_index_ptr, cuda_data_type, CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2, buffer_ptr);
     //Finally, free buffer:
     cudaFree(buffer_ptr);
-	std::cout << "transpose done.\n";
+    std::cout << "transpose done.\n";
     return;
 }
 Csr_matrix Csr_matrix::get_transpose() const {

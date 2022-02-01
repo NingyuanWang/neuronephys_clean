@@ -62,7 +62,7 @@ struct
 {
     GLuint vao;
     GLint width, height;
-	std::string title;
+    std::string title;
     GLuint shaderProgram, tex_shaderProgram;
     GLuint texture;
     GLFWwindow* window;
@@ -164,7 +164,7 @@ void startup (GLfloat const& width, GLfloat const& height, const char* title="Un
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-	g_attrs.title = title;
+    g_attrs.title = title;
     g_attrs.window = glfwCreateWindow(g_attrs.width, g_attrs.height, title, nullptr, nullptr);
     if(!g_attrs.window) {
         std::cerr<<"failed to initialize window"<<std::endl;
@@ -225,11 +225,11 @@ void load_in_connectivity(int const* connectivity_inds, int const* offset_into_i
 void add_points(float const* points, int const N)
 {
     g_attrs.points.insert(g_attrs.points.end(), (glm::vec3*)points, ((glm::vec3*)points) + N);
-	glBindBuffer(GL_ARRAY_BUFFER, g_attrs.pos_buff);
-	glBufferData(GL_ARRAY_BUFFER,
-			g_attrs.points.size() * sizeof(glm::vec3),
-			g_attrs.points.data(),
-			GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, g_attrs.pos_buff);
+    glBufferData(GL_ARRAY_BUFFER,
+            g_attrs.points.size() * sizeof(glm::vec3),
+            g_attrs.points.data(),
+            GL_DYNAMIC_DRAW);
 }
 
 void add_lines(int const* lines, int const N)
@@ -261,26 +261,26 @@ bool render (float const* voltages, void const* slice, int const slice_width, in
     glClear(GL_DEPTH_BUFFER_BIT);
 
     // Rotation of object.
-	if (glfwGetMouseButton(g_attrs.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
-	{
-		double xpos, ypos;
-		glfwGetCursorPos(g_attrs.window, &xpos, &ypos);
-		//    glfwSetCursorPos(g_attrs.window, g_attrs.width/2, g_attrs.height/2);
-		glm::vec2 mouse{
-			xpos - g_attrs.width / 2,
-			g_attrs.height / 2 - ypos
-		};
-		g_attrs.theta = 0.001f * (mouse - g_attrs.mouse);
+    if (glfwGetMouseButton(g_attrs.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    {
+        double xpos, ypos;
+        glfwGetCursorPos(g_attrs.window, &xpos, &ypos);
+        //    glfwSetCursorPos(g_attrs.window, g_attrs.width/2, g_attrs.height/2);
+        glm::vec2 mouse{
+            xpos - g_attrs.width / 2,
+            g_attrs.height / 2 - ypos
+        };
+        g_attrs.theta = 0.001f * (mouse - g_attrs.mouse);
 
-		auto rot_mat = glm::rotate(glm::mat4(1.0f), -g_attrs.theta.x, glm::vec3(0.0f, 1.0f, 0.0f));
-		rot_mat = glm::rotate(rot_mat, -g_attrs.theta.y, glm::vec3(0.0f, 0.0f, 1.0f));
-		g_attrs.cam_pos = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_pos, 1.0f));
-		g_attrs.cam_forward = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_forward, 1.0f));
-		g_attrs.cam_right = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_right, 1.0f));
+        auto rot_mat = glm::rotate(glm::mat4(1.0f), -g_attrs.theta.x, glm::vec3(0.0f, 1.0f, 0.0f));
+        rot_mat = glm::rotate(rot_mat, -g_attrs.theta.y, glm::vec3(0.0f, 0.0f, 1.0f));
+        g_attrs.cam_pos = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_pos, 1.0f));
+        g_attrs.cam_forward = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_forward, 1.0f));
+        g_attrs.cam_right = glm::vec3(rot_mat * glm::vec4(g_attrs.cam_right, 1.0f));
 
-		g_attrs.view = glm::lookAt(g_attrs.cam_pos, g_attrs.look_pos, glm::vec3(0.0f, 1.0f, 0.0f));
-		g_attrs.mouse = mouse;
-	}
+        g_attrs.view = glm::lookAt(g_attrs.cam_pos, g_attrs.look_pos, glm::vec3(0.0f, 1.0f, 0.0f));
+        g_attrs.mouse = mouse;
+    }
     else if (g_attrs.rotate)
     {
         auto rot_mat = glm::rotate(glm::mat4(1.0f), 0.003f, glm::vec3(0.0, 1.0, 0.0));
@@ -289,18 +289,18 @@ bool render (float const* voltages, void const* slice, int const slice_width, in
     }
 
     // Shifting of object.
-	if (glfwGetKey(g_attrs.window, GLFW_KEY_W) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(0, 0, 1));
-	else if (glfwGetKey(g_attrs.window, GLFW_KEY_S) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(0, 0, 1));
-	else if (glfwGetKey(g_attrs.window, GLFW_KEY_Q) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(0, 1, 0));
-	else if (glfwGetKey(g_attrs.window, GLFW_KEY_E) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(0, 1, 0));
-	else if (glfwGetKey(g_attrs.window, GLFW_KEY_A) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(1, 0, 0));
-	else if (glfwGetKey(g_attrs.window, GLFW_KEY_D) == GLFW_PRESS)
-		g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(1, 0, 0));
+    if (glfwGetKey(g_attrs.window, GLFW_KEY_W) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(0, 0, 1));
+    else if (glfwGetKey(g_attrs.window, GLFW_KEY_S) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(0, 0, 1));
+    else if (glfwGetKey(g_attrs.window, GLFW_KEY_Q) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(0, 1, 0));
+    else if (glfwGetKey(g_attrs.window, GLFW_KEY_E) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(0, 1, 0));
+    else if (glfwGetKey(g_attrs.window, GLFW_KEY_A) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, 0.01f * glm::vec3(1, 0, 0));
+    else if (glfwGetKey(g_attrs.window, GLFW_KEY_D) == GLFW_PRESS)
+        g_attrs.model = glm::translate(g_attrs.model, -0.01f * glm::vec3(1, 0, 0));
 
     // Bind voltage buffer and enable voltage attribute
     glEnableVertexAttribArray(g_attrs.pos_loc);
@@ -315,21 +315,21 @@ bool render (float const* voltages, void const* slice, int const slice_width, in
 
     if (g_attrs.draw_mode > 0 && !g_attrs.lines.empty())
     {
-		// Draw the connectivity.
-		glUniform1i(g_attrs.render_lines_loc, 1);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_attrs.line_buff);
-		glDrawElements(GL_LINES, g_attrs.lines.size(), GL_UNSIGNED_INT, (void*)0);
-		glUniform1i(g_attrs.render_lines_loc, 0);
+        // Draw the connectivity.
+        glUniform1i(g_attrs.render_lines_loc, 1);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_attrs.line_buff);
+        glDrawElements(GL_LINES, g_attrs.lines.size(), GL_UNSIGNED_INT, (void*)0);
+        glUniform1i(g_attrs.render_lines_loc, 0);
     }
 
     // Render neurons
     if(g_attrs.draw_mode < 2)
-		glDrawArrays(GL_POINTS, 0, g_attrs.points.size());
+        glDrawArrays(GL_POINTS, 0, g_attrs.points.size());
 
     // Render texture
     if(slice)
     {
-		g_attrs.slice_index %= slice_width;
+        g_attrs.slice_index %= slice_width;
         glDisableVertexAttribArray(g_attrs.voltage_loc);
 
         // Disable voltage attribute and enable tex_coords attribute
@@ -431,7 +431,7 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 int setup(float*& voltages, float const* positions, size_t N, size_t render_N)
 {
     {
-        g_attrs.world_min = glm::vec3(-1.0);
+        g_attrs.world_min = glm::vec3(-1.0f);
         g_attrs.world_max = glm::vec3(1.0f);
 
         // setup render points 
@@ -444,7 +444,7 @@ int setup(float*& voltages, float const* positions, size_t N, size_t render_N)
         cout << "Number of points for rendering: " << render_N << endl;
 
         g_attrs.voltages.resize(g_attrs.points.size(), 0.0f);
-        startup(1920, 1080, "Neuron Ephys");
+        startup(1024, 768, "Neuron Ephys");
      
         // Compile shaders for texture and voltages.
         initShaders("Shaders/vert.glsl", "Shaders/frag.glsl", g_attrs.shaderProgram);
@@ -483,12 +483,12 @@ int setup(float*& voltages, float const* positions, size_t N, size_t render_N)
                 g_attrs.voltages.data(),
                 GL_DYNAMIC_DRAW);
 
-		glGenBuffers(1, &g_attrs.line_buff);
+        glGenBuffers(1, &g_attrs.line_buff);
 
         // Generate texture
         glGenTextures(1, &g_attrs.texture);
 
-		glfwSetInputMode(g_attrs.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwSetInputMode(g_attrs.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
     // Init projection, view, model matrices
     g_attrs.projection = glm::perspective(glm::radians(45.0f),(GLfloat)g_attrs.width/g_attrs.height, 0.1f, 1000.0f); 

@@ -22,14 +22,14 @@ inline __global__ void electrodes_measure_kernel (
 
 void ElectrodeNet::DoElectrodeMeasurements (Float const* V_ptr)
 {
-	electrodes_measure_kernel<<<NBLOCKS, NTHREADS>>>(
+    electrodes_measure_kernel<<<NBLOCKS, NTHREADS>>>(
         N_regions,
         thrust::raw_pointer_cast(d_regions.indices.data()),
         thrust::raw_pointer_cast(d_regions.offset_in_indices.data()),
         thrust::raw_pointer_cast(d_avg_voltages.data()),
         V_ptr);
-	gpuErrchk( cudaPeekAtLastError() );
-	gpuErrchk( cudaDeviceSynchronize() );
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
 
     // Copy averages from GPU to CPU.
     h_avg_voltages = d_avg_voltages;

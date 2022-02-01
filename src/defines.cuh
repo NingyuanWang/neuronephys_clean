@@ -3,6 +3,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -197,12 +198,12 @@ namespace diekman_params {
     constexpr static const Float Kp = 3;           // mV       neurontransmitter activation rate
     constexpr static const Float clk = 2.2;        //          strength of the influence of the molecular clock on the electrical activity
     constexpr static const Float gto = 1.66;        //          gto is the molecular clock variable corresponding to GSK3 activity
-    constexpr static const Float g_gaba = 0.1;     // GABA coupling conductance coefficient.
+    constexpr static const Float g_gaba = 0.01;     // GABA coupling conductance coefficient.
     constexpr static const Float g_paracrine = 0;// Paracrine coupling conductance coefficient.
     //constexpr static const Float e_gaba = 20.0;     //Coupling potential for GABA and paracrine signalling
     constexpr static const Float e_paracrine = 20.0;//Coupling potential for paracrine signalling
     constexpr const static Float Ar = 5.0; constexpr const static Float Ad = 0.18; // alpha and beta for GABA gating variable
-    constexpr const static Float appcur = 3.5;      // Input current
+    constexpr const static Float appcur = 3.5f;      // Input current
     constexpr static const Float white_noise_mean = 0.1f;
     constexpr static const Float white_noise_intensity = 0.05f; // Controls stddev of white noise.
 };
