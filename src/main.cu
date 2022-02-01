@@ -511,7 +511,7 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
     int const print_incs = (int)((1000.0 / samp_freq) / diekman_params::leapfrog_dt + 0.5);
 
     Float circadian_time = 10.1;
-    Circadian circadian("../circtable.csv");//initialize circadian class
+    Circadian circadian("circtable.csv");//initialize circadian class
 
     _RunAndPrintSimulation(nincs, print_incs, fout,
         N, sim_vars, sim_vars_cpu,
@@ -521,7 +521,7 @@ void diekman_benchmark(int const N = 1, int const samp_freq = 1000, float const 
         graphics_voltage_handle,
         render_N,
         &electrode_net,
-        nullptr,
+        &paracrine,
         circadian_time,
         &circadian);
 
@@ -535,7 +535,7 @@ int main()
 {
     cusparseCreate(&Csr_matrix::handle);
     int N = 14638;
-    int N_electrodes = 10;
-    diekman_benchmark(N, 2500, 10, N_electrodes);
+    int N_electrodes = 1000;
+    diekman_benchmark(N, 2500, 100, N_electrodes);
     Graphics::terminate_graphics();
 }

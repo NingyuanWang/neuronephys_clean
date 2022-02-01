@@ -330,12 +330,13 @@ void Csr_matrix::dense_vector_multiplication(const Float* x_ptr, Float* Ax_ptr) 
     cusparseErrchk(cusparseCreateDnVec(&x_vec, col_count, (void*)x_ptr, CUDA_R_32F));
     cusparseErrchk(cusparseCreateDnVec(&Ax_vec, row_count, (void*)Ax_ptr, CUDA_R_32F));
     gpuErrchk(cudaDeviceSynchronize());
-    size_t buffer_size;
+    size_t* buffer_size = new size_t;
     Float* d_mv_buffer;
-    cusparseErrchk(cusparseSpMV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, mat_desc, x_vec, &beta, Ax_vec, type, CUSPARSE_CSRMV_ALG1, &buffer_size));
+    cusparseErrchk(cusparseSpMV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, mat_desc, x_vec, &beta, Ax_vec, type, CUSPARSE_CSRMV_ALG1, buffer_size));
     gpuErrchk(cudaDeviceSynchronize());
-    cudaMalloc(&d_mv_buffer, buffer_size);
-    std::wcout << "BUF SIZE " << buffer_size << std::endl;
+    cudaMalloc(&d_mv_buffer, *buffer_size);
+    std::wcout << "BUF SIZE " << *buffer_size << std::endl;
+    delete buffer_size;
     cusparseErrchk(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, mat_desc, x_vec, &beta, Ax_vec, type, CUSPARSE_CSRMV_ALG1, d_mv_buffer));
     gpuErrchk(cudaDeviceSynchronize());
     cudaFree(d_mv_buffer);
@@ -419,14 +420,15 @@ void Csr_matrix::get_transpose(Csr_matrix& AT) const {
     int* o_row_entrycount_ptr = thrust::raw_pointer_cast(AT.d_row_entrycount.data());
     int* o_col_index_ptr = thrust::raw_pointer_cast(AT.d_col_index.data());
     void* o_value_ptr = thrust::raw_pointer_cast(AT.d_value.data());
-    size_t buffer_size;
+    size_t* buffer_size = new size_t;
     //First: find buffer required.
     cusparseCsr2cscEx2_bufferSize(handle, row_count, col_count, nnz, i_value_ptr, i_row_entrycount_ptr, i_col_index_ptr,
-        o_value_ptr, o_row_entrycount_ptr, o_col_index_ptr, cuda_data_type, CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2, &buffer_size);
+        o_value_ptr, o_row_entrycount_ptr, o_col_index_ptr, cuda_data_type, CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2, buffer_size);
     //Then: allocate buffer
     void* buffer_ptr;
-    cudaGetErrorString(cudaMalloc(&buffer_ptr, sizeof(double) * buffer_size));
-    std::cout << "Required buffer size: " << buffer_size << std::endl;
+    cudaGetErrorString(cudaMalloc(&buffer_ptr, sizeof(double) * *buffer_size));
+    std::cout << "Required buffer size: " << *buffer_size << std::endl;
+    delete buffer_size;
     //Perform transpose:
     cusparseCsr2cscEx2(handle, row_count, col_count, nnz, i_value_ptr, i_row_entrycount_ptr, i_col_index_ptr,
         o_value_ptr, o_row_entrycount_ptr, o_col_index_ptr, cuda_data_type, CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2, buffer_ptr);
