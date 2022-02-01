@@ -571,7 +571,7 @@ int main()
 {
     cusparseCreate(&Csr_matrix::handle);
     int N = 14638;
-    int N_electrodes = N;
+    int N_electrodes = 1000;
     diekman_benchmark(N, 2500, 100, N_electrodes);
     Graphics::terminate_graphics();
 }
