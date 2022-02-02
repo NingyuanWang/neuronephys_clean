@@ -5,6 +5,8 @@ The repository is also integrated with Dockerfile that enables ```single-line co
 The suggested installation method is to build using docker. To install docker on your computer, refer to [get docker](https://docs.docker.com/get-docker/). 
 Additionally, a supported NVIDIA GPU, a sufficiently recent driver (```>= v440.82``` for Linux, ```>= v471.41``` for Windows has been verified to work.)
 
+For Linux-based machines, [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) is needed.
+
 For Windows-based machines, WSL2 backend for docker is used. Either Windows 10 Insider preview version or Windows 11 is needed. Refer to [this page](https://docs.nvidia.com/cuda/wsl-user-guide/index.html) and [this page](https://docs.microsoft.com/ja-jp/windows/ai/directml/gpu-cuda-in-wsl) about the setup for CUDA on WSL2. 
 
 When docker is correctly installed, the image can be built by
