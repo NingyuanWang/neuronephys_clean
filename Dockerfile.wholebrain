@@ -122,7 +122,7 @@ COPY ann /ann
 RUN cd /ann \
     && cmake -DCMAKE_BUILD_TYPE=Release . \
     && make ANN
-#Install arrayfire:
+
 # Setting up symlinks for libcuda and OpenCL ICD
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/libcuda.so.1 && \
     ln -s /usr/lib/libcuda.so.1 /usr/lib/libcuda.so && \
@@ -141,31 +141,6 @@ RUN cd /tmp && \
     apt update -y && apt install -y intel-basekit
 
 SHELL ["/bin/bash", "-c"]
-
-# AF_DISABLE_GRAPHICS - Environment variable to disable graphics at
-# runtime due to lack of graphics support by docker - visit
-# http://arrayfire.org/docs/configuring_environment.htm#af_disable_graphics
-# for more information
-ENV AF_PATH=/opt/arrayfire AF_DISABLE_GRAPHICS=1
-ARG COMPILE_GRAPHICS=OFF
-RUN source /opt/intel/oneapi/setvars.sh && \
-    git clone --depth 1 --recursive https://github.com/arrayfire/arrayfire.git -b v3.7 && \
-    cd arrayfire && mkdir build && cd build && \
-    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/arrayfire-3 \
-             -DCMAKE_BUILD_TYPE=Release \
-             -DAF_BUILD_CPU=OFF \
-             -DAF_BUILD_CUDA=ON \
-             -DAF_BUILD_DOCS=OFF \
-             -DAF_BUILD_EXAMPLES=OFF \
-             -DAF_BUILD_OPENCL=OFF \
-             -DAF_BUILD_UNIFIED=OFF \
-             -DAF_WITH_FREEIMAGE_STATIC=OFF && \
-             # -DCOMPUTES_DETECTED_LIST="30;35;37;50;52;60" \
-    make -j8 && make install && \
-    mkdir -p ${AF_PATH} && ln -s /opt/arrayfire-3/* ${AF_PATH}/ && \
-    echo "${AF_PATH}/lib" >> /etc/ld.so.conf.d/arrayfire.conf && \
-    echo "/usr/local/cuda/nvvm/lib64" >> /etc/ld.so.conf.d/arrayfire.conf && \
-    ldconfig
 #
 ################################################################################
 # builder
@@ -201,7 +176,7 @@ RUN sed -i 's#app/locale/#novnc/app/locale/#' /src/web/dist/static/novnc/app/ui.
 ################################################################################
 FROM system
 LABEL maintainer="wang.ningyuan.mail2@gmail.com"
-COPY src /src/neuronephys
+COPY src_wholebrain /src/neuronephys
 #Build neuronephys:
 RUN cd /src/neuronephys \
     && cmake -B build \
@@ -211,7 +186,10 @@ RUN cd /src/neuronephys \
     && cd build \
     && make \
     && mv neuronephys ../neuronephys
-COPY scn_atlas.h5 /src/neuronephys/scn_atlas.h5
+COPY cortex_connectivity_1m_1k_exc.h5 /src/neuronephys/cortex_connectivity_1m_1k_exc.h5
+COPY cortex_connectivity_1m_1k_inh.h5 /src/neuronephys/cortex_connectivity_1m_1k_inh.h5
+COPY CUBIC_regionID_lookup_no_comma.json /src/neuronephys/CUBIC_regionID_lookup_no_comma.json
+COPY 2d_brain_region.bmp /src/neuronephys/2d_brain_region.bmp
 COPY --from=builder /src/web/dist/ /usr/local/lib/web/frontend/
 COPY rootfs /
 RUN ln -sf /usr/local/lib/web/frontend/static/websockify /usr/local/lib/web/frontend/static/novnc/utils/websockify && \

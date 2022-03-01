@@ -1,6 +1,8 @@
 # neuronephys_clean
 A cleaned version of neuroephys_v2 that removed the binary dependencies and replaced them by a cmakelists.txt.
 The repository is also integrated with Dockerfile that enables ```single-line configuration.```
+
+This repository uses ```git LFS``` to handle the large binary files. Install it before cloning the repository. 
 ## Installation guide
 The suggested installation method is to build using docker. To install docker on your computer, refer to [get docker](https://docs.docker.com/get-docker/). 
 Additionally, a supported NVIDIA GPU, a sufficiently recent driver (```>= v440.82``` for Linux, ```>= v471.41``` for Windows has been verified to work.)
@@ -13,12 +15,18 @@ When docker is correctly installed, the image can be built by
 
 ```docker build -t <tag_name> .```
 in the root directory. (Replace ```<tag_name>``` with a name of the image of your choice without the brackets. The process is slow (more than 30 minutes), as Arrayfire is huge, and is built from source.)
+
+To build the whole-brain simulation version, build by specifying the alternate Dockerfile:
+
+```docker build -f Dockerfile.wholebrain -t <tag_name> .```
+
 ## Run guide
 With the configuration complete, run
 
 ```docker run -v /shm/dev:/dhm/dev -p 6080:80 --gpus all -m 8192m <tag_name>```
 
 Note: ```-m 8192m``` allows the container to use up to 8G of memory, and is verified to be sufficient for the example. It may be possible to tighten this bound.
+For the whole-brain simulation, allocate at least 16G of memory.
 
 Then visit ```127.0.0.1:6080``` using a modern web browser.
 
