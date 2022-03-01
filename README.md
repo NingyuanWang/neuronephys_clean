@@ -3,6 +3,8 @@ A cleaned version of neuroephys_v2 that removed the binary dependencies and repl
 The repository is also integrated with Dockerfile that enables ```single-line configuration.```
 
 This repository uses ```git LFS``` to handle the large binary files. Install it before cloning the repository. 
+
+Given that free github account has a file size limit of 2GB and I do not plan to pay, please download the whole brain connectivity from Google Drive following [this](https://drive.google.com/file/d/1AZ0BQPchTO6ox4L7q46hkCfSDCEGNA3z/view?usp=sharing) and [this](https://drive.google.com/file/d/1ixmnoQwt5Ih-XqgJtzK_x6tC_40fvFWU/view?usp=sharing) link.
 ## Installation guide
 The suggested installation method is to build using docker. To install docker on your computer, refer to [get docker](https://docs.docker.com/get-docker/). 
 Additionally, a supported NVIDIA GPU, a sufficiently recent driver (```>= v440.82``` for Linux, ```>= v471.41``` for Windows has been verified to work.)
