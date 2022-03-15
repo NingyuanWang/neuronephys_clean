@@ -1,3 +1,4 @@
+This repository is archived, refer to [this repository](https://github.com/DSPsleeporg/neuronephys_clean) for further updates.
 # neuronephys_clean
 A cleaned version of neuroephys_v2 that removed the binary dependencies and replaced them by a cmakelists.txt.
 The repository is also integrated with Dockerfile that enables ```single-line configuration.```
